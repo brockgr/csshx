@@ -1,0 +1,1324 @@
+#!/usr/bin/perl
+
+#==============================================================================#
+# csshX -- Cluster SSH tool for MacOS-X Termial.app                            #
+#==============================================================================#
+# Copyright 2009 by Gavin Brock <gbrock@cpan.org>                              #
+#                                                                              #
+# This program is free software; you may redistribute it and/or modify it      #
+# under the same terms as Perl itself.                                         #
+#==============================================================================#
+
+use strict;
+use warnings;
+
+our $VERSION = 0.56;
+
+our $config; # Global configuration object..
+
+#use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; };
+
+#==============================================================================#
+
+package CsshX::Config;
+
+use Pod::Usage;
+use Getopt::Long;
+use POSIX qw(uname);
+
+my @config_keys = qw(
+    color_disabled color_master_background
+    color_selected color_master_foreground
+    config help launchpid login man master
+    master_height menubar_height screen_bounds
+    slave slavehost slaveid sock version osver
+);
+
+sub new {
+    my ($pack) = @_;
+    
+    bless my $obj = {
+        color_disabled          => '{37779,37779,37779}',
+        color_selected          => '{17990,35209,53456}',
+        color_master_background => '{38036,0,0}',
+        color_master_foreground => '{65535,65535,65535}',
+        menubar_height          => 22, # Pixels
+        master_height           => 87, # Pixels
+        clusters => {}
+    }, ref($pack) || $pack;
+
+    ($obj->{osver} = (uname)[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
+    
+    $obj->load_clusters("/etc/clusters");
+    $obj->load_csshrc($_) foreach ("/etc/csshrc", "$ENV{HOME}/.csshrc");
+
+    GetOptions($obj, 
+        "config|c=s@", "login|l=s",   "master",      "slave",
+        "sock=s",      "slavehost=s", "launchpid=s", "slaveid=s",
+        "help|h",      "man|m",       "version|v",
+    ) || $obj->pod(-msg => "$0: bad usage\n");
+
+    $obj->load_csshrc($_) foreach @{$obj->{config}};
+
+    return $obj;
+}
+
+sub load_clusters {
+    my ($obj, $config_file) = @_;
+    return unless -f $config_file;
+
+    open(my $fh, $config_file ) || die "Can't read [$config_file]: $!";
+    while (defined(my $line = <$fh>)) {
+        $line =~ s/#.*$//;
+        my ($cluster, @hosts) = split /\s+/, $line;
+        next unless @hosts;
+        $obj->{clusters}->{$cluster} = \@hosts;
+    }
+}
+
+sub load_csshrc {
+    my ($obj, $config_file) = @_;
+    return unless -f $config_file;
+
+    my (@clusters, %settings);
+    open(my $fh, $config_file ) || die "Can't read [$config_file]: $!";
+    while (defined(my $line = <$fh>)) {
+        $line =~ s/#.*$//;
+
+        if (my ($key, $value) = ($line =~ m/^\s*(\S+)\s*=\s*(.*?)\s*$/)) {
+            if ($key eq 'extra_cluster_file') {
+                $obj->load_clusters($_) foreach (
+                    map { s/(~|\$HOME)/$ENV{HOME}/g} split /\s*,\s*/, $value
+                );
+            } elsif ($key eq 'clusters') {
+                push @clusters, split /\s+/, $value;
+            } else {
+                $settings{$key} = $value;
+            }
+        }
+    }
+    foreach my $cluster (@clusters) {
+        if (my @hosts = split /\s+/, $settings{$cluster}) {
+            $obj->{clusters}->{$cluster} = \@hosts;
+        }
+    }
+    foreach my $key (@config_keys) {
+        $obj->{$key} = $settings{$key} if $settings{$key};
+    }
+}
+
+sub hosts {
+    my ($obj) = @_;
+
+    my @hosts;
+    while (my $arg = shift @ARGV) {
+        if (my $subhosts = $obj->{clusters}->{$arg}) {
+            push @ARGV, @$subhosts;
+        } else {
+            push @hosts, $arg;
+        }
+    }
+
+    pod2usage(-msg => "$0: Need at least one hostname or clustername\n")
+        unless @hosts;
+
+    return @hosts;
+}
+
+foreach my $prop (@config_keys) {
+    no strict 'refs';
+    *{"CsshX::Config::$prop"} = sub { $_[0]->{$prop} };
+}
+
+    
+sub pod { shift; pod2usage(@_) }
+    
+
+#==============================================================================#
+
+package CsshX::Socket;
+
+use base qw(IO::Socket::UNIX);
+
+sub set_read_buffer  { *{$_[0]}->{buf_read}  = $_[1]; }
+sub set_write_buffer { *{$_[0]}->{buf_write} = $_[1] }
+
+sub read_buffered {
+    my ($obj) = @_;
+    *$obj->{buf_read} = '' unless defined *$obj->{buf_read};
+    if ($obj->sysread(*$obj->{buf_read}, 1024, length *$obj->{buf_read})) {
+        return *$obj->{buf_read};
+    } else {
+        $obj->terminate;
+    }
+}
+
+sub write_buffered {
+    my ($obj) = @_;
+    if (my $bwrote = $obj->syswrite(*$obj->{buf_write}, 1024)) {
+        substr(*$obj->{buf_write},0,$bwrote,'');
+        return ! (length *$obj->{buf_write});;
+    } else {
+        $obj->terminate;
+    }
+}
+
+sub terminate { $_[0]->close; }
+
+
+#==============================================================================#
+
+package CsshX::Socket::Selectable;
+
+use base qw(CsshX::Socket);
+use IO::Select;
+
+sub new {
+    my ($pack, @args) = @_;
+    my $obj = $pack->SUPER::new(@args);
+    *$obj->{readers} = IO::Select->new($obj);
+    *$obj->{writers} = IO::Select->new();
+    return $obj;
+}
+
+sub readers { *{$_[0]}->{readers} }
+sub writers { *{$_[0]}->{writers} }
+
+sub handle_io {
+    my ($obj) = @_;
+    my ($can_read, $can_write) = IO::Select::select($obj->readers, $obj->writers);
+    foreach my $reader (@$can_read)  { $reader->can_read()   }
+    foreach my $writer (@$can_write) { $writer->write_buffered && 
+                                       $obj->writers->remove($writer); }
+}
+
+sub terminate {
+    my ($obj) = @_;
+    $obj->writers->remove($obj);
+    $obj->readers->remove($obj);
+    $obj->SUPER::terminate;
+}
+
+
+#==============================================================================#
+
+package CsshX::Window;
+
+use base    qw(IO::Handle);
+use MacPerl qw(DoAppleScript);
+
+# TODO - There is a race condition if you change terminal windows between the 
+#        "do script" and the "return front window". As far as I can see, 10.4/5
+#        do not give you any feedback from a "do script" and there is no way
+#        to "do script in window foo" where foo is a newly made window. :-(
+
+sub script { DoAppleScript($_[1]) };
+
+sub open_window {
+    my ($pack, @args) = @_;
+    my $cmd = join ' ', map { s/(["'])/\$1/g; "'$_'" } @args;
+    my $window_id = $pack->script('
+        tell application "Terminal.app"
+            do script "exec '.$cmd.'"
+            --do script "'.$cmd.'"
+            return front window
+        end tell
+    ') || return;
+
+    $pack->set_windowid($window_id) if ref $pack;
+    return $window_id;
+}
+
+sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
+sub windowid      { *{$_[0]}->{windowid};         }
+
+sub set_color {
+    my ($obj, $type, $color) = @_;
+    $obj->script(
+        'tell application "Terminal.app" to set '.$type.
+        ' color of '.$obj->windowid.' to '.$color
+    );
+    $obj->script('
+        tell application "Terminal.app" to set background color of '.
+        $obj->windowid.' to background color of '.$obj->windowid
+   ) if (($type ne 'background') && ($config->osver =~ /^10.4/));
+}
+
+sub store_color {
+    my ($obj, $type) = @_;
+    *$obj->{$type.'_color'} = $obj->script(
+        'tell application "Terminal" to return '.$type.
+        ' color of '.$obj->windowid
+    ) unless defined *$obj->{$type.'_color'};
+}
+
+sub restore_color {
+    my ($obj, $type) = @_;
+    $obj->set_color($type, *$obj->{$type.'_color'})
+        if defined *$obj->{$type.'_color'};
+    *$obj->{$type.'_color'} = undef;
+}
+
+sub screen_bounds {
+    my ($obj) = @_;
+    if ( my ($origin_x, $origin_y, $win_width, $win_height) = ((
+        $config->screen_bounds || $obj->script(
+        'tell application "Finder" to return bounds of window of desktop'
+    )) =~ m/\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}/)) {
+        my $bounds = {
+            x => $origin_x,  y => $origin_y,
+            w => $win_width, h => $win_height
+        };
+
+        unless ($config->screen_bounds) {
+            $bounds->{y} += $config->menubar_height;
+            $bounds->{h} -= $config->menubar_height;
+        }
+
+        return $bounds;
+
+    } else {
+        die "Bad bounds";
+    }
+}
+
+sub size {
+    my ($obj) = @_;
+    if ( my ($w, $h) = ($obj->script(
+        'tell application "Terminal" to return size of '.$obj->windowid
+    ) =~ m/\{\s*(\d+),\s*(\d+)\}/)) {
+        return { w => $w, h => $h };
+    }
+}
+
+sub close_window {
+    my ($obj) = @_;
+    $obj->script('
+        ignoring application responses
+            tell application "Terminal" to close '.$obj->windowid.'
+        end ignoring
+    ');
+}
+    
+sub minimise {
+    my ($obj) = @_;
+    $obj->script('
+        ignoring application responses
+            tell application "Terminal" to set miniaturized of '.
+            $obj->windowid.' to true
+        end ignoring
+    ');
+}
+
+
+#==============================================================================#
+
+package CsshX::Window::Master;
+
+use base qw(CsshX::Window);
+
+
+sub format {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+
+    my $fg = $config->color_master_foreground;
+    my $bg = $config->color_master_background;
+    my $mh = $config->master_height;
+    my $bounds = $obj->screen_bounds;
+
+    my $w = $bounds->{w};
+    my $h = $bounds->{y} + $bounds->{h} - $mh;
+
+    $obj->script('
+       tell application "Terminal.app"
+            try
+                set miniaturized of '.$windowid.' to false
+                set size of '.$windowid.' to { '.$w.', '.$mh.' }
+                set position of '.$windowid.' to { '.$bounds->{x}.', '.$h.' }
+                set background color of '.$windowid.' to '.$bg.'
+                set normal text color of '.$windowid.' to '.$fg.'
+                set frontmost of '.$windowid.' to true
+            end try
+        end tell
+    ');
+}
+
+
+#==============================================================================#
+
+package CsshX::Window::Slave;
+
+use base qw(CsshX::Window);
+use POSIX qw(ceil);
+
+my $slaveids_by_location = [];
+my $current_selection = [0,0];
+
+sub disabled      { *{$_[0]}->{disabled};         }
+sub set_disabled  {
+    my ($obj, $value) = @_;
+    (*$obj->{disabled}=$value) ?  $obj->format_disabled : $obj->format_enabled;
+}
+
+sub selected      { *{$_[0]}->{selected};         }
+sub set_selected  {
+    my ($obj, $value) = @_;
+    (*$obj->{selected}=$value) ?  $obj->format_selected : $obj->format_unselected;
+}
+
+sub format_selected {
+    $_[0]->store_color('background');
+    $_[0]->set_color('background', $config->color_selected);
+}
+
+sub format_unselected {
+    $_[0]->restore_color('background');
+}
+
+sub format_enabled {
+    foreach ('normal text', 'bold_text') {
+        $_[0]->restore_color($_)
+    }
+};
+
+sub format_disabled {
+    foreach ('normal text', 'bold_text') {
+        $_[0]->store_color($_);
+        $_[0]->set_color($_, $config->color_disabled);
+    }
+};
+
+sub get_by_location {
+    my ($pack,$x,$y) = @_;
+    if ($slaveids_by_location) {
+        if (defined(my $slaveid = $slaveids_by_location->[$y]->[$x])) {
+            return CsshX::Master::Socket::Slave->get_by_slaveid($slaveid);
+        }
+    }
+}
+
+sub selection_on {
+    my ($pack, $bool) = @_;
+    if (my $obj = $pack->get_by_location(@$current_selection)) {
+        $obj->set_selected(1);
+    }
+}
+
+sub selection_off {
+    my ($pack) = @_;
+    if (my $obj = $pack->get_by_location(@$current_selection)) {
+        $obj->set_selected(0);
+    }
+}
+
+sub selected_window {
+    my ($pack) = @_;
+    if (my $obj = $pack->get_by_location(@$current_selection)) {
+        return $obj;
+    }
+}
+
+sub select_move {
+    my ($pack,$x,$y) = @_;
+    $pack->selection_off;
+    $current_selection->[0]=($current_selection->[0]+$x)%$pack->grid_cols if $x;
+    $current_selection->[1]=($current_selection->[1]+$y)%$pack->grid_rows if $y;
+    if (my $obj = $pack->selected_window()) {
+        $obj->set_selected(1);
+    } else {
+        $pack->select_move($x,$y);
+    }
+}
+
+sub grid_rows { scalar @{$slaveids_by_location}       }
+sub grid_cols { scalar @{$slaveids_by_location->[0]}  }
+
+sub grid {
+    my ($pack, $master, @windows) = @_;
+    return unless @windows;
+
+    my $master_height = $config->master_height;
+    my $bounds = $master->screen_bounds;
+
+    my $rows = ceil(@windows ** 0.5);
+
+    my $best_rows = $rows;
+    my $best_score = $rows;
+
+    foreach my $n (0,-1,1,-2,2) {
+        my $mod = @windows % ($rows+$n);
+        if ($mod == 0) {
+            $best_rows = $rows+$n;
+            last;
+        } else {
+            my $score = $rows+$n-$mod;
+            if ($score < $best_score) {
+                $best_score = $score;
+                $best_rows = $rows+$n;
+            } 
+        }
+    }
+    $rows = $best_rows;
+
+    my $cols   = ceil(@windows / $rows);
+
+    my $width  = int($bounds->{w} / $cols);
+    my $height = int(($bounds->{h} - $master_height) / $rows);
+    $slaveids_by_location = [ [] ];
+
+    my $x = $bounds->{x};
+    my $y = $bounds->{y};
+    foreach my $window (@windows) {
+        my $windowid = $window->windowid || next;
+        my $slaveid  = $window->slaveid  || next;
+
+        if ($x + $width > $bounds->{w} + $bounds->{x}) {
+            $x = $bounds->{x};
+            $y += $height;
+            push @{$slaveids_by_location}, [];
+        }
+
+        my $frame = '{'.$x.', '.$y.', '.($x+$width).', '.($y+$height).' }';
+
+        $pack->script('
+            ignoring application responses
+                tell application "Terminal.app"
+                    try
+                        set miniaturized of '.$windowid.' to false
+                        set frontmost of '.$windowid.' to true
+                        set size of '.$windowid.' to { '.$width.', '.$height.' }
+                        set position of '.$windowid.' to { '.$x.', '.$y.' }
+                        set size of '.$windowid.' to { '.$width.', '.$height.' }
+                    end try
+                end tell
+            end ignoring
+        ');
+
+        push @{$slaveids_by_location->[-1]}, $slaveid;
+        $x += $width;
+    }
+}
+
+
+#==============================================================================#
+
+package CsshX::Process;
+
+sub clear { print "\e[1J\e[0;0H" };
+sub title { print "\e]0;$_[1]\7" };
+
+
+#==============================================================================#
+
+package CsshX::Launcher;
+
+use base    qw(CsshX::Socket::Selectable);
+use FindBin qw($Bin $Script);
+use POSIX   qw(tmpnam);
+
+my  $script = "$Bin/$Script"; # Path to this script
+
+sub new {
+    my ($pack) = @_;
+
+    my @hosts  = $config->hosts;
+    my $sock   = $config->sock || tmpnam();
+    my $login  = $config->login || '';
+    my @config = @{$config->config};
+
+    my $ready = 0;
+    my $greeting = "launcher\n";
+    local $SIG{USR1} = sub { $ready = 1; };
+
+    my $master_windowid = CsshX::Window::Master->open_window(
+        $script, '--master', '--sock', $sock, '--launchpid', $$,
+        $login  ? ( '--login',    $login  ) :(),
+        (map { ('--config', $_) } @config),
+    ) || die "Master window failed to open";
+    $greeting .= "$master_windowid\n";
+
+    my @slave_windows;
+    my $slave_id = 0;
+    foreach my $host (@hosts) {
+        $slave_id++;
+        my $slave_windowid = CsshX::Window::Slave->open_window(
+            $script, '--slave', '--sock', $sock, '--slavehost', $host,
+            '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
+            (map { ('--config', $_) } @config),
+        ) || next;
+        $greeting .= "$slave_id $slave_windowid\n";
+    }
+    $greeting .= "done\n";
+
+    # Wait for master to be ready
+    for (1..20) {
+        last if $ready;
+        sleep 1;
+    }
+    die "No master" unless $ready;
+
+    my $obj = $pack->SUPER::new($sock) || die $!;
+
+    $obj->set_write_buffer($greeting);
+    $obj->writers->add($obj);
+
+    $obj->handle_io() while $obj->readers->handles;
+
+    exit 0;
+}
+
+sub can_read { $_[0]->terminate }
+
+
+#==============================================================================#
+
+package CsshX::Slave;
+
+use base qw(CsshX::Socket::Selectable);
+use base qw(CsshX::Window::Slave);
+use base qw(CsshX::Process);
+
+my $TIOCSTI = 0x80017472; # 10.4/10.5
+
+sub new {
+    my ($pack) = @_;
+    
+    die "No host name passed by launcher" unless $config->slavehost;
+
+    if (my $pid =  fork) {
+        close(STDOUT);
+        my $obj = $pack->SUPER::new($config->sock) || die $!;
+
+        local $SIG{CHLD} = sub { warn "CHILD"; $obj->terminate; wait };
+        local $SIG{TTOU} = 'IGNORE';
+
+        my $greeting = 'slave '.$config->slaveid.' '.$config->slavehost."\n";
+
+        $obj->set_write_buffer($greeting);
+        $obj->writers->add($obj);
+
+        $obj->handle_io() while $obj->readers->handles;
+    } else {
+        $|=1;
+        $pack->clear();
+        $pack->title($config->slavehost);
+        exec( 'ssh',
+            $config->login ? ('-l', $config->login) : (),
+            $config->slavehost
+        ) || die $!;
+    }
+}
+
+sub can_read {
+    my ($obj) = @_;
+    my $buffer = $obj->read_buffered;
+    foreach (split //, $buffer) {
+        ioctl(STDIN, $TIOCSTI, $_) == 0 || die;
+    }
+    $obj->set_read_buffer('');
+}
+
+
+#==============================================================================#
+
+package CsshX::Master;
+
+use base qw(CsshX::Socket::Selectable);
+use base qw(CsshX::Process);
+use base qw(CsshX::Window::Master);
+
+my $need_redraw = 1;
+
+sub new {
+    my ($pack) = @_;
+
+    my $sock = $config->sock || die "--sock sockfile is required";
+    unlink $sock;
+    my $obj = $pack->SUPER::new(Listen => 32, Local => $sock) || die $!;
+    chmod 0700, $sock || die "Chmod";
+
+    local $SIG{INT} = 'IGNORE';
+    local $SIG{TSTP} = 'IGNORE';
+    local $SIG{PIPE}  = "IGNORE";
+    local $SIG{WINCH} = sub { $need_redraw=1 };
+
+    $|=1;
+
+    my $stdin = CsshX::Master::Socket::Input->new(*STDIN, "r");
+    $stdin->set_master($obj);
+    $stdin->set_mode('input');
+    $obj->readers->add($stdin);
+
+    kill('USR1', $config->launchpid) || warn "Could not wake up launcher";
+
+    while ((!defined $obj->windowid) || $obj->slave_count || $obj->launcher) {
+        $obj->redraw if $need_redraw;
+        $obj->title("Master - ".$obj->slave_count." connetions");
+        $obj->handle_io();
+    }
+    unlink $sock;
+    warn "Done";
+}
+
+sub can_read {
+    my ($obj) = @_;
+    my $client = $obj->accept("CsshX::Master::Socket::Unknown");
+    $client->set_master($obj);
+    $obj->readers->add($client);
+}
+
+sub send_terminal_input {
+    my ($obj, $buffer) = @_;
+    if (length $buffer) {
+        foreach my $client ($obj->slaves) {
+            $client->send_input($buffer) unless $client->disabled;
+        }
+    }
+}
+
+sub set_launcher { *{$_[0]}->{launcher} = $_[1]; }
+sub launcher     { *{$_[0]}->{launcher};         }
+
+sub set_prompt   { *{$_[0]}->{prompt} = $_[1]; $need_redraw = 1; }
+sub prompt       { *{$_[0]}->{prompt};         }
+
+sub slaves       { CsshX::Master::Socket::Slave->slaves; }
+sub slave_count  { CsshX::Master::Socket::Slave->slave_count; }
+
+sub register_slave {
+    my ($obj, $slaveid, $hostname, $windowid) = @_;
+
+    my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
+                CsshX::Master::Socket::Slave->new($slaveid);
+    
+    $slave->set_windowid($windowid) if $windowid;
+    $slave->set_hostname($hostname) if $hostname;
+    $slave->set_master($obj);
+        
+    return $slave;
+}
+        
+
+sub redraw {
+    my ($obj) = @_;
+    $obj->clear;
+    print $obj->prompt;
+    $need_redraw = 0;
+}
+
+sub arrange_windows {
+    my ($obj) = @_;
+    CsshX::Window::Slave->grid($obj, grep {$_->windowid} $obj->slaves);
+    $obj->format();
+}
+
+
+#==============================================================================#
+
+package CsshX::Master::Socket;
+
+use base qw(CsshX::Socket);
+
+sub set_master { *{$_[0]}->{master} = $_[1]; }
+sub master     { *{$_[0]}->{master} };
+
+sub terminate {
+    my ($obj) = @_;
+    $obj->master->writers->remove($obj);
+    $obj->master->readers->remove($obj);
+    $obj->SUPER::terminate;
+}
+
+
+#==============================================================================#
+
+package CsshX::Master::Socket::Input;
+
+use base qw(CsshX::Master::Socket);
+
+my $kb = "\e[4m\e[1m"; # Bold Underline
+my $kk = "\e[0m";      # Reset
+
+my $modes = {
+    'input' => {
+        prompt => "Input to terminal: (Ctrl-a to enter control mode)\r\n",
+        onchange => sub { system 'stty', 'raw' },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            #print join(' ', map { unpack("H2", $_) } split //, $buffer)."\r\n";
+        
+            if ($buffer =~ s/^(.*?)\001//) {
+                $obj->master->send_terminal_input($1);
+                $obj->set_mode_and_parse('action', $buffer);
+            } else {
+                $obj->master->send_terminal_input($buffer);
+                $obj->set_read_buffer('');
+            }
+        }
+
+    },
+    'action' => {
+        prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
+        "[c]reate windwow, [r]etile, [e]nable/disable input, e[n]able all, ".
+        "[t]oggle enabled, [m]inimse, e[x]it\r\n",
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+        
+            while (length $buffer) {
+                if ($buffer =~ s/^\e//) {
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^[a\001]//) {
+                    $obj->master->send_terminal_input("\001");
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^r//) {
+                    $obj->master->arrange_windows;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^c//) {
+                    return $obj->set_mode_and_parse('addhost', $buffer);
+                } elsif ($buffer =~ s/^e//) {
+                    return $obj->set_mode_and_parse('enable', $buffer);
+                } elsif ($buffer =~ s/^n//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->set_disabled(0);
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^t//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->set_disabled(!$window->disabled);
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^m//) {
+                    $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^x//) {
+                    foreach my $slave (CsshX::Master::Socket::Slave->slaves) {
+                        $slave->close_window;
+                    }
+                    exit 0;
+                } else {
+                    substr($buffer, 0, 1, '');
+                    print "\007";
+                }
+            };
+            $obj->set_read_buffer('');
+        }
+    },
+    'enable' => {
+        prompt => "Select window with cursors: (Esc to exit)\r\n".
+        "[e]nable input, [d]isable input, disable [o]thers, [t]oggle intput",
+        onchange => sub { CsshX::Window::Slave->selection_on; },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+
+            while (length $buffer) {
+                #print join(' ', map { unpack("H2", $_) } split //, $buffer)."\r\n";
+                if ($buffer =~ s/^(l|\e\[C)//) {
+                    CsshX::Window::Slave->select_move(1,0);
+                } elsif ($buffer =~ s/^(h|\e\[D)//) {
+                    CsshX::Window::Slave->select_move(-1,0);
+                } elsif ($buffer =~ s/^(k|\e\[A)//) {
+                    CsshX::Window::Slave->select_move(0,-1);
+                } elsif ($buffer =~ s/^(j|\e\[B)//) {
+                    CsshX::Window::Slave->select_move(0,1);
+                } elsif ($buffer =~ s/^\e//) {
+                    CsshX::Window::Slave->selection_off;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^d//) {
+                    if (my $window = CsshX::Window::Slave->selected_window()) {
+                        $window->set_disabled(1);
+                    };
+                } elsif ($buffer =~ s/^e//) {
+                    if (my $window = CsshX::Window::Slave->selected_window()) {
+                        $window->set_disabled(0);
+                    };
+                } elsif ($buffer =~ s/^t//) {
+                    if (my $window = CsshX::Window::Slave->selected_window()) {
+                        $window->set_disabled(!$window->disabled);
+                    };
+                } elsif ($buffer =~ s/^o//) {
+                    if (my $selected = CsshX::Window::Slave->selected_window()) {
+                        foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                            $window->set_disabled(1) unless $window == $selected;
+                        }
+                        $selected->set_disabled(0);
+                        CsshX::Window::Slave->selection_off;
+                        return $obj->set_mode_and_parse('input', $buffer);
+                    };
+                } else {
+                    substr($buffer, 0, 1, '');
+                    print "\007";
+                }
+            }
+            $obj->set_read_buffer('');
+        },
+    },
+    'addhost' => {
+        prompt => 'Add Host: ',
+        onchange => sub { system 'stty', 'sane' },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            if ($buffer =~ s/^([^\n]*)\e//) {
+                return $obj->set_mode_and_parse('input', $buffer);
+            } elsif ($buffer =~ s/^(.*?)\r?\n//) {
+                my $hostname = $1;
+                if (length $hostname) {
+                    my $slaveid = CsshX::Master::Socket::Slave->next_slaveid;
+                    my $sock = $config->sock;
+                    my $login = $config->login || '';
+                    my @config = @{$config->config};
+                    my $slave = $obj->master->register_slave($slaveid, $hostname, undef);
+                    $slave->open_window(
+                        $script, '--slave', '--sock', $sock, 
+                        '--slavehost', $hostname, '--slaveid', $slaveid,
+                        $login  ? ( '--login',    $login  ) :(),
+                        (map { ('--config', $_) } @config),
+                    );
+                    $obj->master->arrange_windows;
+                }
+                return $obj->set_mode_and_parse('input', $buffer);
+            }
+            $obj->set_read_buffer($buffer);
+        },
+    },
+};
+
+
+sub new {
+    my ($pack, @opts) = @_;
+    my $obj = $pack->SUPER::new_from_fd(@opts);
+    return $obj;
+}
+
+sub mode     { *{$_[0]}->{csshx_mode} }
+sub set_mode { 
+    my ($obj, $mode) = @_;
+    if (!$obj->mode || $mode ne $obj->mode) {
+        *$obj->{csshx_mode} = $mode;
+        $modes->{$mode}->{onchange}->($obj) if $modes->{$mode}->{onchange};
+        $obj->master->set_prompt($modes->{$mode}->{prompt});
+    }
+}
+
+sub set_mode_and_parse { 
+    my ($obj, $mode, $buffer) = @_;
+    $obj->set_mode($mode);
+    $modes->{$mode}->{parse_buffer}->($obj, $buffer);
+}
+
+sub can_read {
+    my ($obj) = @_;
+    my $buffer = $obj->read_buffered;
+    $modes->{$obj->mode}->{parse_buffer}->($obj, $buffer);
+}
+
+
+#==============================================================================#
+
+package CsshX::Master::Socket::Unknown;
+
+use base qw(CsshX::Master::Socket);
+
+sub can_read {
+    my ($obj) = @_;
+    my $buffer = $obj->read_buffered;
+    $obj->parse_buffer($buffer);
+}
+
+sub parse_buffer {
+    my ($obj, $buffer) = @_;
+    if ($buffer =~ s/^(.*?)\n//s) {
+        my $type = $1;
+        $obj->set_read_buffer($buffer);
+        
+        if ($type =~ /^slave\s+(\d+)\s+(\S+)$/) {
+            my ($slaveid, $hostname) = ($1,$2);
+            bless $obj, 'CsshX::Master::Socket::Slave';
+            $obj->replace_slave($slaveid, $hostname, undef);
+        } elsif ($type eq "launcher") {
+            bless $obj, 'CsshX::Master::Socket::Launcher';
+            $obj->master->set_launcher($obj);
+            $obj->parse_buffer($buffer);
+        } else {
+            warn "$obj is not a known client [$type]";
+            $obj->terminate;
+        }
+    }
+}
+
+
+#==============================================================================#
+
+package CsshX::Master::Socket::Slave;
+
+use base qw(CsshX::Master::Socket);
+use base qw(CsshX::Window::Slave);
+
+my $slaves_by_slaveid = {};
+
+sub new {
+    my ($pack, $slaveid) = @_;
+    my $obj = $slaves_by_slaveid->{$slaveid} = $pack->SUPER::new();
+    $obj->set_slaveid($slaveid);
+    return $obj;
+}
+
+sub can_read {
+    my ($obj) = @_;
+    $obj->terminate;
+}
+
+sub send_input {
+    my ($obj, $buffer) = @_;
+    $obj->set_write_buffer($buffer);
+    $obj->master->writers->add($obj);
+}
+
+sub terminate {
+    my ($obj) = @_;
+    delete $slaves_by_slaveid->{$obj->slaveid};
+    $obj->SUPER::terminate();
+}
+
+sub replace_slave {
+    my ($obj, $slaveid, $hostname, $windowid) = @_;
+    if (my $old = $obj->get_by_slaveid($slaveid)) {
+        $hostname ||= $old->hostname;
+        $windowid ||= $old->windowid;
+    }
+    $obj->set_slaveid($slaveid);
+    $obj->set_windowid($windowid) if $windowid;
+    $obj->set_hostname($hostname) if $hostname;
+    $slaves_by_slaveid->{$slaveid} = $obj;
+}
+
+sub get_by_slaveid { $slaves_by_slaveid->{$_[1]}; }
+sub set_slaveid    { *{$_[0]}->{slaveid} = $_[1]; }
+sub slaveid        { *{$_[0]}->{slaveid};         }
+
+sub set_hostname   { *{$_[0]}->{hostname} = $_[1]; }
+sub hostname       { *{$_[0]}->{hostname};         }
+
+sub slave_count { scalar keys %$slaves_by_slaveid }
+sub slaves { (
+    map {$slaves_by_slaveid->{$_}} sort {$a<=>$b} keys %$slaves_by_slaveid
+) }
+
+sub next_slaveid {
+    my ($pack) = @_;
+    my $max_id = 0;
+    foreach (keys %$slaves_by_slaveid) { $max_id = $_ if $_ > $max_id }
+    return $max_id + 1;
+}
+
+#==============================================================================#
+
+package CsshX::Master::Socket::Launcher;
+
+use base qw(CsshX::Master::Socket);
+
+sub can_read {
+    my ($obj) = @_;
+    my $buffer = $obj->read_buffered;
+    $obj->parse_buffer($buffer);
+}
+
+sub parse_buffer {
+    my ($obj, $buffer) = @_;
+
+    while ($buffer =~ s/(.*?)\n//s) {
+        my $msg = $1;
+        if (!defined $obj->master->windowid) {
+            $obj->master->set_windowid($msg);
+        } elsif ($msg eq 'done') {
+            $obj->master->arrange_windows;
+            $obj->terminate;
+        } elsif ($msg =~ /^(\d+)\s*(.*)$/) {
+            my ($slaveid, $windowid) = ($1, $2);
+            $obj->master->register_slave($slaveid, undef, $windowid);
+        } else {
+            warn "Bad Message [$msg]";
+            $obj->terminate;
+        }
+    }
+    $obj->set_read_buffer($buffer);
+}
+
+sub terminate {
+    my ($obj) = @_;
+    $obj->master->set_launcher(undef);
+    $obj->SUPER::terminate();
+}
+
+
+#==============================================================================#
+# main();
+#
+
+package main;
+
+$config = CsshX::Config->new;
+
+if    ($config->help)    { $config->pod(-verbose => 1) }
+elsif ($config->man)     { $config->pod(-verbose => 2) }
+elsif ($config->version) { die "csshX v$VERSION\n"     }
+elsif ($config->master)  { CsshX::Master->new()        }
+elsif ($config->slave)   { CsshX::Slave->new()         }
+else                     { CsshX::Launcher->new()      }
+
+#
+# vim: expandtab sw=4 ts=4 sts=4:
+#==============================================================================#
+
+__END__
+
+=head1 NAME
+
+csshX - Cluster SSH tool using MacOS-X Terminal.app
+
+=head1 SYNOPSIS
+
+csshX [B<--login> I<username>] [B<--config> I<filename>]
+[I<host1> [I<host2>]..]
+
+csshX [B<-h> | B<-m> | B<-v> ]
+
+
+=head1 DESCRIPTION
+
+B<csshX> is a tool to allow simultaneous control of multiple SSH sessions. 
+I<host1>, I<host2>, etc. are either remote hostnames or remote cluster names.
+B<csshX> will attempt to create an SSH session to each remote host in seperate
+Terminal.app windows. A I<master> window will also be created. All keyboard 
+input in the master will be sent to all the I<slave> windows.
+
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-l> I<username>, B<--login> I<username>
+
+Remote user to authenticate as.
+
+=item B<-c> I<configfile>, B<--config> I<configfile>
+
+Alternative config file to use
+
+=item B<-h>, B<--help>
+
+Quick summary of program usage
+
+=item B<-m>, B<--man>
+
+Full program man page
+
+=item B<-v>, B<--version>
+
+Displays the version of csshX
+
+=item B<--sock> I<sockfile>
+
+Sets the unix domain socket filename to be used for interprocess communication.
+This may be set by the user in the launcher session, possibly for security
+reasons.
+
+=back
+
+=head1 WINDOW CONTROL
+
+The master window allows additional windows to be opened, control of input
+to be selected and retiling. These are all accessed using the B<Ctrl-a> key
+sombination.
+
+Use B<Esc> to return to input mode.
+
+=over 4
+
+=item B<Ctrl-a c>  
+
+Open a new terminal and connect to another host. Prompts for hostname. B<Esc> cancels hostname input.
+
+=item B<Ctrl-a Ctrl-a> or B<Ctrl-a a>
+
+Sends a Control a (\001) character to all enabled terminals.
+
+=item B<Ctrl-a r>  
+
+Retiles all windows. Also unminimises and brings windows to front.
+
+=item B<Ctrl-a m>  
+
+Minimise all windows.
+
+=item B<Ctrl-a x>  
+
+Close all windows and exit.
+
+=item B<Ctrl-a t>  
+
+Toggle the enabled status of all windows.
+
+=item B<Ctrl-a n>  
+
+Renable all windows for input.
+
+=item B<Ctrl-a e>  
+
+Enter window selection mode. In window slection mode the following keys are
+available:
+
+=back
+
+=over 8
+
+=item B<Arrow keys> B<h>,B<j>,B<k>,B<l>
+
+Change window selection.
+
+=item B<e>  
+
+Enable input for selected window.
+
+=item B<d>  
+
+Disnable input for selected window.
+
+=item B<t>  
+
+Toggle enable mode for selected window.
+
+=item B<o>  
+
+Disable all windows except for selected.
+
+=item B<Esc>  
+
+Return to input mode.
+
+=back
+
+
+=head1 CONFIGURATION FILES
+
+B<csshX> accepts Cluster-SSH B<clusters> and B<csshrc> style configurations.
+Only a subset of attributes are currently supported, and a few attribute have
+been added.
+
+=head2 CLUSTERS
+
+The default clusters file is B</etc/clusters>. Additional files can be specified
+using the B<extra_cluster_file> setting in any B<csshrc> file.
+
+The format is:
+
+    cluster1 host1 host2
+    cluster2 host3 host4
+
+Hash '#' can be use for comments.
+
+=head2 CSSHRC
+
+Thee default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files 
+can be specified with the B<--config> option on the command line.
+
+Hash '#' can be use for comments.
+
+=over 4
+
+=item B<clusters>
+
+A list of clusters of hosts.
+
+    clusters = cluster1 cluster2
+    cluster1 = hostname1 hostname2
+    cluster2 = hostname3 hostname4
+
+Foreach cluster defined in clusters, an entry
+must exist with the host definitions for that cluster.
+
+
+=item B<extra_cluster_file>
+
+An additional B<clusters> configuration file to include.
+
+    extra_cluster_file = /tmp/extra_clusters
+
+=item B<color_master_background>
+
+(csshX only) The applescript color identifier for the background of the
+master window. Default: I<{38036,0,0}> (dark red)
+
+=item B<color_master_foreground>
+
+(csshX only) The applescript color identifier for the foreground font  of the
+master window. Default: I<{65535,65535,65535}> (white)
+
+=item B<master_height>
+
+(csshX only) The height of the master window. Default: I<87> pixels
+
+=item B<color_disabled>
+
+(csshX only) The foreground font color for a disabled window.
+Default: I<{37779,37779,37779}> (Mid-grey)
+
+=item B<color_selected>
+
+(csshX only) The background for a selected window in window selection mode.
+Default: I<{17990,35209,53456}> (Mid-blue)
+
+=item B<screen_bounds>
+
+(csshX only) The bounding area of the screen to use for arranging the 
+terminal windows. Default is the actual screen size. Format is:
+
+    { origin_x, origin_y, width, height }
+
+=item B<menubar_height>
+
+(csshX only) The height of the menu bar in pixels. Default: I<22>
+
+=back
+
+
+=head1 BUGS
+
+There is a race condition if you change Terminal windows while they
+are being opened. This is due to the inability to get a handle to a window
+until it is opened. Best thing to to do is to let csshX open it's windows
+without clicking on any of them.
+
+
+=head1 CREDITS
+
+This software is inspired by the X11 based Cluster-SSH project
+by Duncan Ferguson  L<http://sourceforge.net/projects/clusterssh/>.
+Cluster SSH is much more fully featured than csshX will ever be.
+
+The use of TIOCSTI to feed characters into the slave terminal's
+input buffer was copied from the "Perl Cookbook, 2nd Edition"
+page 482, by Tom Christiansen and Nathan Torkington.
+
+
+=head1 AUTHOR
+
+Gavin Brock <gbrock@cpan.org> L<http://brock-family.org/gavin>
+
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2009 by Gavin Brock <gbrock@cpan.org>.
+
+This program is free software; you may redistribute it and/or modify it
+under the same terms as Perl itself.
+
+
+=head1 SEE ALSO
+
+L<http://clusterssh.sourceforge.net/>,
+L<ssh>,
+L<MacPerl>
+L<perl>
+
+=cut
