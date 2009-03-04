@@ -654,7 +654,7 @@ sub new {
 
     while ((!defined $obj->windowid) || $obj->slave_count || $obj->launcher) {
         $obj->redraw if $need_redraw;
-        $obj->title("Master - ".$obj->slave_count." connetions");
+        $obj->title("Master - ".$obj->slave_count." connections");
         $obj->handle_io();
     }
     unlink $sock;
