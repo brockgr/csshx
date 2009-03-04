@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-our $VERSION = 0.56;
+our $VERSION = 0.57;
 
 our $config; # Global configuration object..
 
@@ -1304,6 +1304,8 @@ page 482, by Tom Christiansen and Nathan Torkington.
 =head1 AUTHOR
 
 Gavin Brock <gbrock@cpan.org> L<http://brock-family.org/gavin>
+
+Project page L<http://code.google.com/p/csshx/>
 
 
 =head1 COPYRIGHT AND LICENSE

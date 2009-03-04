@@ -25,7 +25,7 @@ UPDATES:
 
 The latest version of the software is available here:
 
-    http://www.brock-family.org/gavin/macosx/csshX.html
+    http://code.google.com/p/csshx/
 
 Important updated information will be posted on:
 
