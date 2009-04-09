@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-our $VERSION = 0.57;
+our $VERSION = 0.58;
 
 our $config; # Global configuration object..
 
@@ -30,7 +30,7 @@ my @config_keys = qw(
     color_disabled color_master_background
     color_selected color_master_foreground
     config help launchpid login man master
-    master_height menubar_height screen_bounds
+    master_height screen_bounds screen
     slave slavehost slaveid sock version osver
 );
 
@@ -42,8 +42,8 @@ sub new {
         color_selected          => '{17990,35209,53456}',
         color_master_background => '{38036,0,0}',
         color_master_foreground => '{65535,65535,65535}',
-        menubar_height          => 22, # Pixels
         master_height           => 87, # Pixels
+        screen                  => 0,
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -55,6 +55,7 @@ sub new {
     GetOptions($obj, 
         "config|c=s@", "login|l=s",   "master",      "slave",
         "sock=s",      "slavehost=s", "launchpid=s", "slaveid=s",
+        "screen=s",
         "help|h",      "man|m",       "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
@@ -206,6 +207,7 @@ package CsshX::Window;
 
 use base    qw(IO::Handle);
 use MacPerl qw(DoAppleScript);
+use Foundation;
 
 # TODO - There is a race condition if you change terminal windows between the 
 #        "do script" and the "return front window". As far as I can see, 10.4/5
@@ -259,27 +261,39 @@ sub restore_color {
     *$obj->{$type.'_color'} = undef;
 }
 
+sub perlValue ($) { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
+
+my $bounds;
 sub screen_bounds {
     my ($obj) = @_;
-    if ( my ($origin_x, $origin_y, $win_width, $win_height) = ((
-        $config->screen_bounds || $obj->script(
-        'tell application "Finder" to return bounds of window of desktop'
-    )) =~ m/\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}/)) {
-        my $bounds = {
-            x => $origin_x,  y => $origin_y,
-            w => $win_width, h => $win_height
-        };
 
-        unless ($config->screen_bounds) {
-            $bounds->{y} += $config->menubar_height;
-            $bounds->{h} -= $config->menubar_height;
-        }
-
+    my ($x,$y,$w,$h);
+    if ($bounds) {
         return $bounds;
-
+    } elsif ($config->screen_bounds) {
+        ($x,$y,$w,$h) = $config->screen_bounds;
     } else {
-        die "Bad bounds";
+        $config->screen;
+        my $appkit = NSBundle->alloc->init->initWithPath_(
+            '/System/Library/Frameworks/AppKit.framework'
+        );
+        $appkit->load && $appkit->isLoaded || die "AppKit failed to load";
+        @NSScreen::ISA = 'PerlObjCBridge';
+
+        my $scr = $config->screen;
+        my $displays =  NSScreen->screens()->count -1;
+        die "No such screen [$scr], screen must be $displays or less" if ($scr > $displays);
+
+        my $frame =  perlValue(NSValue->valueWithRect_(NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
+        if ($frame =~ /NSRect: \{\{(\d+), (\d+)}, {(\d+), (\d+)\}\}/) {                  # 10.5 style
+            ($x,$y,$w,$h) = ($1,$2,$3,$4);
+        } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) { # 10.4 style
+            ($x,$y,$w,$h) = map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4);
+        } else {
+            die "Can't decode bounds [$frame]";
+        }
     }
+    return $bounds = { x => $x, y => $y, w => $w, h => $h };
 }
 
 sub size {
@@ -327,15 +341,16 @@ sub format {
     my $mh = $config->master_height;
     my $bounds = $obj->screen_bounds;
 
+    my $x = $bounds->{x};
     my $w = $bounds->{w};
-    my $h = $bounds->{y} + $bounds->{h} - $mh;
+    my $y = $bounds->{y};
 
     $obj->script('
        tell application "Terminal.app"
             try
                 set miniaturized of '.$windowid.' to false
                 set size of '.$windowid.' to { '.$w.', '.$mh.' }
-                set position of '.$windowid.' to { '.$bounds->{x}.', '.$h.' }
+                set origin of '.$windowid.' to { '.$x.', '.$y.' }
                 set background color of '.$windowid.' to '.$bg.'
                 set normal text color of '.$windowid.' to '.$fg.'
                 set frontmost of '.$windowid.' to true
@@ -468,18 +483,16 @@ sub grid {
     $slaveids_by_location = [ [] ];
 
     my $x = $bounds->{x};
-    my $y = $bounds->{y};
+    my $y = $bounds->{h}+$bounds->{y}-$height;
     foreach my $window (@windows) {
         my $windowid = $window->windowid || next;
         my $slaveid  = $window->slaveid  || next;
 
         if ($x + $width > $bounds->{w} + $bounds->{x}) {
             $x = $bounds->{x};
-            $y += $height;
+            $y -= $height;
             push @{$slaveids_by_location}, [];
         }
-
-        my $frame = '{'.$x.', '.$y.', '.($x+$width).', '.($y+$height).' }';
 
         $pack->script('
             ignoring application responses
@@ -488,7 +501,7 @@ sub grid {
                         set miniaturized of '.$windowid.' to false
                         set frontmost of '.$windowid.' to true
                         set size of '.$windowid.' to { '.$width.', '.$height.' }
-                        set position of '.$windowid.' to { '.$x.', '.$y.' }
+                        set origin of '.$windowid.' to { '.$x.', '.$y.' }
                         set size of '.$windowid.' to { '.$width.', '.$height.' }
                     end try
                 end tell
@@ -522,6 +535,9 @@ my  $script = "$Bin/$Script"; # Path to this script
 sub new {
     my ($pack) = @_;
 
+    # Call, just to make sure screen number is sane
+    CsshX::Window->screen_bounds;
+
     my @hosts  = $config->hosts;
     my $sock   = $config->sock || tmpnam();
     my $login  = $config->login || '';
@@ -533,6 +549,7 @@ sub new {
 
     my $master_windowid = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$,
+        '--screen', $config->screen,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
     ) || die "Master window failed to open";
@@ -1123,6 +1140,10 @@ Sets the unix domain socket filename to be used for interprocess communication.
 This may be set by the user in the launcher session, possibly for security
 reasons.
 
+=item B<--screen> I<number>
+
+Sets the screen on which to display the terminals, if you have multiple monitors.
+
 =back
 
 =head1 WINDOW CONTROL
@@ -1275,9 +1296,10 @@ terminal windows. Default is the actual screen size. Format is:
 
     { origin_x, origin_y, width, height }
 
-=item B<menubar_height>
+=item B<screen>
 
-(csshX only) The height of the menu bar in pixels. Default: I<22>
+(csshX only) The screen number which to draw the terminal windows.
+Default: I<0>  (Main window)
 
 =back
 
