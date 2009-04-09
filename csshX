@@ -763,6 +763,7 @@ my $modes = {
         onchange => sub { system 'stty', 'raw' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
+            $buffer =~ s/\033\[([ABCD])/\033O$1/gs; # Convert CSI to SS3 cursor codes
             #print join(' ', map { unpack("H2", $_) } split //, $buffer)."\r\n";
         
             if ($buffer =~ s/^(.*?)\001//) {
