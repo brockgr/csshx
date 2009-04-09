@@ -285,7 +285,7 @@ sub screen_bounds {
         die "No such screen [$scr], screen must be $displays or less" if ($scr > $displays);
 
         my $frame =  perlValue(NSValue->valueWithRect_(NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
-        if ($frame =~ /NSRect: \{\{(\d+), (\d+)}, {(\d+), (\d+)\}\}/) {                  # 10.5 style
+        if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {                  # 10.5 style
             ($x,$y,$w,$h) = ($1,$2,$3,$4);
         } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) { # 10.4 style
             ($x,$y,$w,$h) = map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4);
