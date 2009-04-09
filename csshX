@@ -12,11 +12,10 @@
 use strict;
 use warnings;
 
-our $VERSION = 0.58;
+our $VERSION = 0.59;
 
 our $config; # Global configuration object..
 
-#use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; };
 
 #==============================================================================#
 
@@ -30,7 +29,7 @@ my @config_keys = qw(
     color_disabled color_master_background
     color_selected color_master_foreground
     config help launchpid login man master
-    master_height screen_bounds screen
+    master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
 );
 
@@ -44,6 +43,7 @@ sub new {
         color_master_foreground => '{65535,65535,65535}',
         master_height           => 87, # Pixels
         screen                  => 0,
+        debug                   => 0,
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -55,7 +55,7 @@ sub new {
     GetOptions($obj, 
         "config|c=s@", "login|l=s",   "master",      "slave",
         "sock=s",      "slavehost=s", "launchpid=s", "slaveid=s",
-        "screen=s",
+        "screen=s",    "debug:+",
         "help|h",      "man|m",       "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
@@ -219,10 +219,10 @@ sub script { DoAppleScript($_[1]) };
 sub open_window {
     my ($pack, @args) = @_;
     my $cmd = join ' ', map { s/(["'])/\$1/g; "'$_'" } @args;
+    $cmd = "exec $cmd" unless $config->debug;
     my $window_id = $pack->script('
         tell application "Terminal.app"
-            do script "exec '.$cmd.'"
-            --do script "'.$cmd.'"
+            do script "'.$cmd.'"
             return front window
         end tell
     ') || return;
@@ -549,7 +549,7 @@ sub new {
 
     my $master_windowid = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$,
-        '--screen', $config->screen,
+        '--screen', $config->screen, '--debug', $config->debug,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
     ) || die "Master window failed to open";
@@ -561,6 +561,7 @@ sub new {
         $slave_id++;
         my $slave_windowid = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
+            '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
         ) || next;
@@ -1077,6 +1078,9 @@ package main;
 
 $config = CsshX::Config->new;
 
+eval "use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }"
+    if $config->debug;
+
 if    ($config->help)    { $config->pod(-verbose => 1) }
 elsif ($config->man)     { $config->pod(-verbose => 2) }
 elsif ($config->version) { die "csshX v$VERSION\n"     }
@@ -1106,7 +1110,7 @@ csshX [B<-h> | B<-m> | B<-v> ]
 
 B<csshX> is a tool to allow simultaneous control of multiple SSH sessions. 
 I<host1>, I<host2>, etc. are either remote hostnames or remote cluster names.
-B<csshX> will attempt to create an SSH session to each remote host in seperate
+B<csshX> will attempt to create an SSH session to each remote host in separate
 Terminal.app windows. A I<master> window will also be created. All keyboard 
 input in the master will be sent to all the I<slave> windows.
 
@@ -1144,14 +1148,23 @@ reasons.
 =item B<--screen> I<number>
 
 Sets the screen on which to display the terminals, if you have multiple monitors.
+Default: I<0>  (Main window)
+
+=item B<--debug> I<number>
+
+Sets the debug level. Number is optional and will default to 1 if ommitted.
+
+Currently only one level of debug is supported. It will enable backtrace on
+fatal errors, and will keep terminal windows open after terminating (so you can
+see any errors).
 
 =back
 
 =head1 WINDOW CONTROL
 
 The master window allows additional windows to be opened, control of input
-to be selected and retiling. These are all accessed using the B<Ctrl-a> key
-sombination.
+to be selected and re-tiling. These are all accessed using the B<Ctrl-a> key
+combination.
 
 Use B<Esc> to return to input mode.
 
@@ -1300,7 +1313,12 @@ terminal windows. Default is the actual screen size. Format is:
 =item B<screen>
 
 (csshX only) The screen number which to draw the terminal windows.
-Default: I<0>  (Main window)
+See --screen in L<OPTIONS>
+
+=item B<debug>
+
+The debug level to use. Defaults to 0.
+See --debug in L<OPTIONS>
 
 =back
 
