@@ -142,7 +142,7 @@ package CsshX::Socket;
 use base qw(IO::Socket::UNIX);
 
 sub set_read_buffer  { *{$_[0]}->{buf_read}  = $_[1]; }
-sub set_write_buffer { *{$_[0]}->{buf_write} = $_[1] }
+sub set_write_buffer { *{$_[0]}->{buf_write} = $_[1]; }
 
 sub read_buffered {
     my ($obj) = @_;
@@ -519,7 +519,7 @@ sub grid {
 package CsshX::Process;
 
 sub clear { print "\e[1J\e[0;0H" };
-sub title { print "\e]0;$_[1]\7" };
+sub title { print "\e]0;csshX - $_[1]\7" };
 
 
 #==============================================================================#
@@ -621,9 +621,14 @@ sub new {
         $|=1;
         $pack->clear();
         $pack->title($config->slavehost);
+
+        # Extract port from hostname:port
+        my ($host,$port) = split /:/, $config->slavehost;
+
         exec( 'ssh',
             $config->login ? ('-l', $config->login) : (),
-            $config->slavehost
+            $port          ? ('-p', $port)          : (),
+            $host
         ) || die $!;
     }
 }
@@ -1101,7 +1106,7 @@ csshX - Cluster SSH tool using MacOS-X Terminal.app
 =head1 SYNOPSIS
 
 csshX [B<--login> I<username>] [B<--config> I<filename>]
-[I<host1> [I<host2>]..]
+[ I<[user@]host1[:port]> [I<[user@]host2[:port]>] .. ]
 
 csshX [B<-h> | B<-m> | B<-v> ]
 
@@ -1114,6 +1119,9 @@ B<csshX> will attempt to create an SSH session to each remote host in separate
 Terminal.app windows. A I<master> window will also be created. All keyboard 
 input in the master will be sent to all the I<slave> windows.
 
+To specify the username for eaxh host, the hostname can be prepended by 
+I<user@>. Similarly, appending I<:port> will set the port to ssh to.
+
 
 =head1 OPTIONS
 
@@ -1121,7 +1129,8 @@ input in the master will be sent to all the I<slave> windows.
 
 =item B<-l> I<username>, B<--login> I<username>
 
-Remote user to authenticate as.
+Remote user to authenticate as for all hosts. This is overridden by
+I<user@>.
 
 =item B<-c> I<configfile>, B<--config> I<configfile>
 
