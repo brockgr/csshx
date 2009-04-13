@@ -1205,11 +1205,16 @@ Sends a Control a (\001) character to all enabled terminals.
 
 =item B<Ctrl-a r>  
 
-Retiles all windows. Also unminimises and brings windows to front.
+Retiles all windows. Also unminimises, unhides and brings windows to front.
 
 =item B<Ctrl-a m>  
 
-Minimise all windows.
+Minimise all windows. (Use retile to restore)
+
+=item B<Ctrl-a h>  
+
+Hide  all windows. This is much faster than minimising since there is no 
+animation. (Use retile to restore)
 
 =item B<Ctrl-a x>  
 
