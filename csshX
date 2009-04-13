@@ -14,8 +14,7 @@ use warnings;
 
 our $VERSION = 0.59;
 
-our $config; # Global configuration object..
-
+my $config; # Global configuration object..
 
 #==============================================================================#
 
@@ -68,13 +67,14 @@ sub load_clusters {
     my ($obj, $config_file) = @_;
     return unless -f $config_file;
 
-    open(my $fh, $config_file ) || die "Can't read [$config_file]: $!";
+    open(my $fh, '<', $config_file ) || die "Can't read [$config_file]: $!";
     while (defined(my $line = <$fh>)) {
         $line =~ s/#.*$//;
         my ($cluster, @hosts) = split /\s+/, $line;
         next unless @hosts;
         $obj->{clusters}->{$cluster} = \@hosts;
     }
+    close($fh);
 }
 
 sub load_csshrc {
@@ -82,7 +82,7 @@ sub load_csshrc {
     return unless -f $config_file;
 
     my (@clusters, %settings);
-    open(my $fh, $config_file ) || die "Can't read [$config_file]: $!";
+    open(my $fh, '<', $config_file ) || die "Can't read [$config_file]: $!";
     while (defined(my $line = <$fh>)) {
         $line =~ s/#.*$//;
 
@@ -98,6 +98,8 @@ sub load_csshrc {
             }
         }
     }
+    close($fh);
+
     foreach my $cluster (@clusters) {
         if (my @hosts = split /\s+/, $settings{$cluster}) {
             $obj->{clusters}->{$cluster} = \@hosts;
@@ -261,10 +263,9 @@ sub restore_color {
     *$obj->{$type.'_color'} = undef;
 }
 
-sub perlValue ($) { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
+sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
 
-my $bounds;
-sub screen_bounds {
+{ my $bounds; sub screen_bounds { # scope $bounds
     my ($obj) = @_;
 
     my ($x,$y,$w,$h);
@@ -282,19 +283,22 @@ sub screen_bounds {
 
         my $scr = $config->screen;
         my $displays =  NSScreen->screens()->count -1;
-        die "No such screen [$scr], screen must be $displays or less" if ($scr > $displays);
+        die "No such screen [$scr], screen must be $displays or less"
+            if ($scr > $displays);
 
-        my $frame =  perlValue(NSValue->valueWithRect_(NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
-        if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {                  # 10.5 style
-            ($x,$y,$w,$h) = ($1,$2,$3,$4);
-        } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) { # 10.4 style
+        my $frame =  perlValue(NSValue->valueWithRect_(
+            NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
+
+        if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {
+            ($x,$y,$w,$h) = ($1,$2,$3,$4); # 10.5 style
+        } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) {
             ($x,$y,$w,$h) = map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4);
         } else {
             die "Can't decode bounds [$frame]";
         }
     }
     return $bounds = { x => $x, y => $y, w => $w, h => $h };
-}
+} }
 
 sub size {
     my ($obj) = @_;
@@ -314,6 +318,16 @@ sub close_window {
     ');
 }
     
+sub hide {
+    my ($obj) = @_;
+    $obj->script('
+        ignoring application responses
+            tell application "Terminal" to set visible of '.
+            $obj->windowid.' to false
+        end ignoring
+    ');
+}
+
 sub minimise {
     my ($obj) = @_;
     $obj->script('
@@ -332,7 +346,7 @@ package CsshX::Window::Master;
 use base qw(CsshX::Window);
 
 
-sub format {
+sub format_master {
     my ($obj) = @_;
     my $windowid = $obj->windowid;
 
@@ -555,7 +569,6 @@ sub new {
     ) || die "Master window failed to open";
     $greeting .= "$master_windowid\n";
 
-    my @slave_windows;
     my $slave_id = 0;
     foreach my $host (@hosts) {
         $slave_id++;
@@ -733,7 +746,7 @@ sub redraw {
 sub arrange_windows {
     my ($obj) = @_;
     CsshX::Window::Slave->grid($obj, grep {$_->windowid} $obj->slaves);
-    $obj->format();
+    $obj->format_master();
 }
 
 
@@ -785,7 +798,7 @@ my $modes = {
     'action' => {
         prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
         "[c]reate windwow, [r]etile, [e]nable/disable input, e[n]able all, ".
-        "[t]oggle enabled, [m]inimse, e[x]it\r\n",
+        "[t]oggle enabled, [m]inimse, [h]ide, e[x]it\r\n",
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
         
@@ -814,6 +827,9 @@ my $modes = {
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^m//) {
                     $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^h//) {
+                    $_->hide foreach (CsshX::Master::Socket::Slave->slaves);
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^x//) {
                     foreach my $slave (CsshX::Master::Socket::Slave->slaves) {
