@@ -26,6 +26,7 @@ use POSIX qw(uname);
 
 my @config_keys = qw(
     color_disabled color_master_background
+    color_setbounds
     color_selected color_master_foreground
     config help launchpid login man master
     master_height screen_bounds screen debug
@@ -40,6 +41,7 @@ sub new {
         color_selected          => '{17990,35209,53456}',
         color_master_background => '{38036,0,0}',
         color_master_foreground => '{65535,65535,65535}',
+        color_setbounds         => '{-27500,0,0,-27441}',
         master_height           => 87, # Pixels
         screen                  => 0,
         debug                   => 0,
@@ -216,6 +218,8 @@ use Foundation;
 #        do not give you any feedback from a "do script" and there is no way
 #        to "do script in window foo" where foo is a newly made window. :-(
 
+my ($cur_bounds, $max_bounds);
+
 sub script { DoAppleScript($_[1]) };
 
 sub open_window {
@@ -265,12 +269,12 @@ sub restore_color {
 
 sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
 
-{ my $bounds; sub screen_bounds { # scope $bounds
+sub screen_bounds { 
     my ($obj) = @_;
 
     my ($x,$y,$w,$h);
-    if ($bounds) {
-        return $bounds;
+    if ($cur_bounds) {
+        return $cur_bounds;
     } elsif ($config->screen_bounds) {
         ($x,$y,$w,$h) = $config->screen_bounds;
     } else {
@@ -297,8 +301,18 @@ sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
             die "Can't decode bounds [$frame]";
         }
     }
-    return $bounds = { x => $x, y => $y, w => $w, h => $h };
-} }
+    $max_bounds = { x => $x, y => $y, w => $w, h => $h };
+    return $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+}
+
+sub reset_bounds {
+    my ($obj) = @_;
+    my $x = $max_bounds->{x};
+    my $y = $max_bounds->{y};
+    my $w = $max_bounds->{w};
+    my $h = $max_bounds->{h};
+    $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+}
 
 sub size {
     my ($obj) = @_;
@@ -373,6 +387,63 @@ sub format_master {
     ');
 }
 
+sub format_resize {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+
+    my $bg = $config->color_setbounds;
+    
+    $obj->script('
+       tell application "Terminal.app"
+            try
+                set background color of '.$windowid.' to '.$bg.'
+            end try
+        end tell
+    ');
+}
+
+sub size_as_bounds {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+
+    my $bounds = $obj->screen_bounds;
+    my $x = $bounds->{x};
+    my $y = $bounds->{y};
+    my $w = $bounds->{w};
+    my $h = $bounds->{h};
+
+    $obj->script('
+       tell application "Terminal.app"
+            try
+                set miniaturized of '.$windowid.' to false
+                set size of '.$windowid.' to { '.$w.', '.$h.' }
+                set origin of '.$windowid.' to { '.$x.', '.$y.' }
+                set frontmost of '.$windowid.' to true
+            end try
+        end tell
+    ');
+};
+
+sub bounds_as_size {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+    
+    my $origin = $obj->script(
+        'tell application "Terminal" to get origin of '.$windowid
+    );
+    my ($x,$y) = ($origin =~ /\{(\d+),\s*(\d+)\}/);
+
+    my $size = $obj->script(
+        'tell application "Terminal" to get size of '.$windowid
+    );
+    my ($w,$h) = ($size =~ /\{(\d+),\s*(\d+)\}/);
+
+    my $bounds = $obj->screen_bounds;
+    $bounds->{x} = $x;
+    $bounds->{y} = $y;
+    $bounds->{h} = $h;
+    $bounds->{w} = $w;
+}
 
 #==============================================================================#
 
@@ -798,7 +869,7 @@ my $modes = {
     'action' => {
         prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
         "[c]reate windwow, [r]etile, [e]nable/disable input, e[n]able all, ".
-        "[t]oggle enabled, [m]inimse, [h]ide, e[x]it\r\n",
+        "[t]oggle enabled, [m]inimse, [h]ide, change [b]ounds, e[x]it\r\n",
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
         
@@ -815,6 +886,8 @@ my $modes = {
                     return $obj->set_mode_and_parse('addhost', $buffer);
                 } elsif ($buffer =~ s/^e//) {
                     return $obj->set_mode_and_parse('enable', $buffer);
+                } elsif ($buffer =~ s/^b//) {
+                    return $obj->set_mode_and_parse('bounds', $buffer);
                 } elsif ($buffer =~ s/^n//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->set_disabled(0);
@@ -843,6 +916,34 @@ my $modes = {
             };
             $obj->set_read_buffer('');
         }
+    },
+    'bounds' => {
+        prompt => "Move and resize master to define bounds: (Esc to exit)\r\n".
+        "[r]eset to default",
+        onchange => sub {
+            my ($obj) = @_;
+            $obj->master->format_resize;
+            $obj->master->size_as_bounds;
+            $_->hide foreach (CsshX::Master::Socket::Slave->slaves);
+        },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            while (length $buffer) {
+                if ($buffer =~ s/^\e//) {
+                    $obj->master->bounds_as_size;
+                    $obj->master->format_master;
+                    $obj->master->arrange_windows;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^r//) {
+                    $obj->master->reset_bounds;
+                    $obj->master->size_as_bounds;
+                } else {
+                    substr($buffer, 0, 1, '');
+                    print "\007";
+                }
+            }
+            $obj->set_read_buffer('');
+        },
     },
     'enable' => {
         prompt => "Select window with cursors: (Esc to exit)\r\n".
