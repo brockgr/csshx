@@ -520,14 +520,30 @@ sub selected_window {
 }
 
 sub select_move {
-    my ($pack,$x,$y) = @_;
+    my ($pack, $x, $y, $move_count) = @_;
+
     $pack->selection_off;
-    $current_selection->[0]=($current_selection->[0]+$x)%$pack->grid_cols if $x;
-    $current_selection->[1]=($current_selection->[1]+$y)%$pack->grid_rows if $y;
+    $move_count ||= 1;
+
+    # Add extra movement in the case that the row/col has no active windows
+    my $extra_y = 0;
+    if ($x && ($move_count > $pack->grid_cols))  {
+        $extra_y  = 1;
+        $move_count = 0;
+    }
+    my $extra_x = 0;
+    if ($y && ($move_count > $pack->grid_rows))  {
+        $extra_x  = 1;
+        $move_count = 0;
+    }
+
+    $current_selection->[0]=($current_selection->[0]+$x+$extra_x)%$pack->grid_cols;
+    $current_selection->[1]=($current_selection->[1]+$y+$extra_y)%$pack->grid_rows;
+
     if (my $obj = $pack->selected_window()) {
         $obj->set_selected(1);
     } else {
-        $pack->select_move($x,$y);
+        $pack->select_move($x, $y, $move_count+1);
     }
 }
 
