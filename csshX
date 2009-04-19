@@ -41,7 +41,7 @@ sub new {
         color_selected          => '{17990,35209,53456}',
         color_master_background => '{38036,0,0}',
         color_master_foreground => '{65535,65535,65535}',
-        color_setbounds         => '{-27500,0,0,-27441}',
+        color_setbounds         => '{17990,35209,53456}',
         master_height           => 87, # Pixels
         screen                  => 0,
         debug                   => 0,
@@ -229,7 +229,8 @@ sub open_window {
     my $window_id = $pack->script('
         tell application "Terminal.app"
             do script "'.$cmd.'"
-            return front window
+            set win to front window
+            return win
         end tell
     ') || return;
 
@@ -599,11 +600,12 @@ sub grid {
             ignoring application responses
                 tell application "Terminal.app"
                     try
-                        set miniaturized of '.$windowid.' to false
-                        set frontmost of '.$windowid.' to true
+                        set visible of '.$windowid.' to false
                         set size of '.$windowid.' to { '.$width.', '.$height.' }
                         set origin of '.$windowid.' to { '.$x.', '.$y.' }
                         set size of '.$windowid.' to { '.$width.', '.$height.' }
+                        set miniaturized of '.$windowid.' to false
+                        set frontmost of '.$windowid.' to true
                     end try
                 end tell
             end ignoring
@@ -1338,6 +1340,17 @@ Minimise all windows. (Use retile to restore)
 Hide  all windows. This is much faster than minimising since there is no 
 animation. (Use retile to restore)
 
+=item B<Ctrl-a b>  
+
+Enter bounds moving and resizing mode.
+
+The master window will grow to cover the slave windows. You may then 
+drag and resize the master window to cover the area you wish to use.
+To save the new bounds, press B<Enter> or B<Esc> to return to 
+previous bounds.
+
+While in bounds moder B<r> will reset to default bounds.
+
 =item B<Ctrl-a x>  
 
 Close all windows and exit.
@@ -1440,6 +1453,11 @@ master window. Default: I<{38036,0,0}> (dark red)
 
 (csshX only) The applescript color identifier for the foreground font  of the
 master window. Default: I<{65535,65535,65535}> (white)
+
+=item B<color_setbounds>
+
+(csshX only) The applescript color identifier for the background color in
+bounds setting mode. Default I<{17990,35209,53456}> (Mid-blue)
 
 =item B<master_height>
 
