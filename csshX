@@ -1226,12 +1226,12 @@ $config = CsshX::Config->new;
 eval "use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }"
     if $config->debug;
 
-if    ($config->help)    { $config->pod(-verbose => 1) }
-elsif ($config->man)     { $config->pod(-verbose => 2) }
-elsif ($config->version) { die "csshX v$VERSION\n"     }
-elsif ($config->master)  { CsshX::Master->new()        }
-elsif ($config->slave)   { CsshX::Slave->new()         }
-else                     { CsshX::Launcher->new()      }
+if    ($config->help)    { $config->pod(-verbose => 1)           }
+elsif ($config->man)     { $config->pod(-verbose => 2)           }
+elsif ($config->version) { die sprintf "csshX v%.2f\n", $VERSION }
+elsif ($config->master)  { CsshX::Master->new()                  }
+elsif ($config->slave)   { CsshX::Slave->new()                   }
+else                     { CsshX::Launcher->new()                }
 
 #
 # vim: expandtab sw=4 ts=4 sts=4:
