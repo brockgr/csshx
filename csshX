@@ -919,8 +919,16 @@ my $modes = {
                 } elsif ($buffer =~ s/^m//) {
                     $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
                     return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^\015//) {
+                    $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
+                    $obj->master->minimise;
+                    return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^h//) {
                     $_->hide foreach (CsshX::Master::Socket::Slave->slaves);
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^\010//) {
+                    $_->hide foreach (CsshX::Master::Socket::Slave->slaves);
+                    $obj->master->minimise;
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^x//) {
                     foreach my $slave (CsshX::Master::Socket::Slave->slaves) {
@@ -1335,10 +1343,19 @@ Retiles all windows. Also unminimises, unhides and brings windows to front.
 
 Minimise all windows. (Use retile to restore)
 
+=item B<Ctrl-a Ctrl-m>  
+
+Minimise all windows and the master window.
+
 =item B<Ctrl-a h>  
 
 Hide  all windows. This is much faster than minimising since there is no 
 animation. (Use retile to restore)
+
+=item B<Ctrl-a Ctrl-h>  
+
+Hide all windows and minimise the master. This is a neat way to hide your
+csshX session without filling your dock with icons.
 
 =item B<Ctrl-a b>  
 
