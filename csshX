@@ -93,6 +93,9 @@ sub load_csshrc {
                 $obj->load_clusters($_) foreach (
                     map { s/(~|\$HOME)/$ENV{HOME}/g} split /\s*,\s*/, $value
                 );
+            } elsif ($key eq 'screen_bounds') {
+                my $bounds = $obj->parse_bounds($value);
+                $settings{$key} = $bounds if $bounds;
             } elsif ($key eq 'clusters') {
                 push @clusters, split /\s+/, $value;
             } else {
@@ -111,6 +114,14 @@ sub load_csshrc {
         $obj->{$key} = $settings{$key} if $settings{$key};
     }
 }
+
+sub parse_bounds {
+    my ($obj,$value) = @_;
+    if ($value =~ /^\s*\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}\s*$/) {
+        return [$1,$2,$3,$4];
+    }
+}
+
 
 sub hosts {
     my ($obj) = @_;
@@ -277,7 +288,7 @@ sub screen_bounds {
     if ($cur_bounds) {
         return $cur_bounds;
     } elsif ($config->screen_bounds) {
-        ($x,$y,$w,$h) = $config->screen_bounds;
+        ($x,$y,$w,$h) = @{$config->screen_bounds};
     } else {
         $config->screen;
         my $appkit = NSBundle->alloc->init->initWithPath_(
@@ -322,6 +333,22 @@ sub size {
     ) =~ m/\{\s*(\d+),\s*(\d+)\}/)) {
         return { w => $w, h => $h };
     }
+}
+
+sub bounds {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+    my $origin = $obj->script(
+        'tell application "Terminal" to get origin of '.$windowid
+    );
+    my ($x,$y) = ($origin =~ /\{(\d+),\s*(\d+)\}/);
+
+    my $size = $obj->script(
+        'tell application "Terminal" to get size of '.$windowid
+    );
+    my ($w,$h) = ($size =~ /\{(\d+),\s*(\d+)\}/);
+
+    return { x => $x, y => $y, w => $w, h => $h };
 }
 
 sub close_window {
@@ -427,24 +454,17 @@ sub size_as_bounds {
 
 sub bounds_as_size {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
     
-    my $origin = $obj->script(
-        'tell application "Terminal" to get origin of '.$windowid
-    );
-    my ($x,$y) = ($origin =~ /\{(\d+),\s*(\d+)\}/);
+    my $win_bounds = $obj->bounds;
+    my $scr_bounds = $obj->screen_bounds;
 
-    my $size = $obj->script(
-        'tell application "Terminal" to get size of '.$windowid
-    );
-    my ($w,$h) = ($size =~ /\{(\d+),\s*(\d+)\}/);
-
-    my $bounds = $obj->screen_bounds;
-    $bounds->{x} = $x;
-    $bounds->{y} = $y;
-    $bounds->{h} = $h;
-    $bounds->{w} = $w;
+    $scr_bounds->{x} = $win_bounds->{x};
+    $scr_bounds->{y} = $win_bounds->{y};
+    $scr_bounds->{h} = $win_bounds->{h};
+    $scr_bounds->{w} = $win_bounds->{w};
 }
+
+
 
 #==============================================================================#
 
@@ -624,6 +644,14 @@ package CsshX::Process;
 sub clear { print "\e[1J\e[0;0H" };
 sub title { print "\e]0;csshX - $_[1]\7" };
 
+sub parse_user_host_port {
+    my ($obj, $string) = @_;
+    if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
+        return ($1, $2, $3);
+    } else {
+        return;
+    }
+}
 
 #==============================================================================#
 
@@ -706,6 +734,8 @@ sub new {
     
     die "No host name passed by launcher" unless $config->slavehost;
 
+    my ($user, $host, $port) = $pack->parse_user_host_port($config->slavehost);
+
     if (my $pid =  fork) {
         close(STDOUT);
         my $obj = $pack->SUPER::new($config->sock) || die $!;
@@ -725,7 +755,6 @@ sub new {
         $pack->title($config->slavehost);
 
         # Extract port from hostname:port
-        my ($host,$port) = split /:/, $config->slavehost;
 
         exec( 'ssh',
             $config->login ? ('-l', $config->login) : (),
@@ -743,6 +772,14 @@ sub can_read {
     }
     $obj->set_read_buffer('');
 }
+
+sub user { *{$_[0]}->{user}; }
+sub port { *{$_[0]}->{port}; }
+sub host { *{$_[0]}->{host}; }
+
+sub set_user { *{$_[0]}->{user} = $_[1]; }
+sub set_port { *{$_[0]}->{port} = $_[1]; }
+sub set_host { *{$_[0]}->{host} = $_[1]; }
 
 
 #==============================================================================#
@@ -906,6 +943,8 @@ my $modes = {
                     return $obj->set_mode_and_parse('enable', $buffer);
                 } elsif ($buffer =~ s/^b//) {
                     return $obj->set_mode_and_parse('bounds', $buffer);
+                } elsif ($buffer =~ s/^s//) {
+                    return $obj->set_mode_and_parse('sendstring', $buffer);
                 } elsif ($buffer =~ s/^n//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->set_disabled(0);
@@ -946,7 +985,7 @@ my $modes = {
     'bounds' => {
         prompt => "Move and resize master to define bounds: (Enter to accept, ".
         "Esc to cancel)\r\n".
-        "[r]eset to default",
+        "[r]eset to default, [p]rint current bounds",
         onchange => sub {
             my ($obj) = @_;
             $obj->master->format_resize;
@@ -968,6 +1007,40 @@ my $modes = {
                 } elsif ($buffer =~ s/^r//) {
                     $obj->master->reset_bounds;
                     $obj->master->size_as_bounds;
+                } elsif ($buffer =~ s/^p//) {
+                    $obj->master->redraw;
+                    my $b = $obj->master->bounds;
+                    print "\r\n\r\nscreen_bounds = {".
+                        join(", ",@{$b}{qw(x y w h)})
+                    ."}\r\n";
+                } else {
+                    substr($buffer, 0, 1, '');
+                    print "\007";
+                }
+            }
+            $obj->set_read_buffer('');
+        },
+    },
+    'sendstring' => {
+        prompt => "Send string to all active windows: (Esc to exit)\r\n".
+        "[h]ostname, [c]onnection string",
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            while (length $buffer) {
+                if ($buffer =~ s/^c//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->send_input($window->hostname) unless $window->disabled;
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^h//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        my $str = $window->hostname;
+                        $str =~ s/^[^@]+@//; $str =~ s/:[^:]+$//;
+                        $window->send_input($str) unless $window->disabled;
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^\e//) {
+                    return $obj->set_mode_and_parse('input', $buffer);
                 } else {
                     substr($buffer, 0, 1, '');
                     print "\007";
@@ -1357,17 +1430,6 @@ animation. (Use retile to restore)
 Hide all windows and minimise the master. This is a neat way to hide your
 csshX session without filling your dock with icons.
 
-=item B<Ctrl-a b>  
-
-Enter bounds moving and resizing mode.
-
-The master window will grow to cover the slave windows. You may then 
-drag and resize the master window to cover the area you wish to use.
-To save the new bounds, press B<Enter> or B<Esc> to return to 
-previous bounds.
-
-While in bounds moder B<r> will reset to default bounds.
-
 =item B<Ctrl-a x>  
 
 Close all windows and exit.
@@ -1415,6 +1477,58 @@ Return to input mode.
 
 =back
 
+=over 4
+
+=item B<Ctrl-a b>  
+
+Enter bounds moving and resizing mode. The master window will grow to cover 
+the slave windows. You may then drag and resize the master window to cover
+the area you wish to use. The following keys are available:
+
+=back
+
+=over 8
+
+=item B<Enter>
+
+Accept newly selected bounds and resize slaves.
+
+=item B<Esc>
+
+Revert to previous bounds.
+
+=item B<r>
+
+Reset to default screen (or configuration file) bounds.
+
+=item B<p>
+
+Print the bounds to the screen in a suitable format for pasting into your csshrc.
+
+=back
+
+=over 4
+
+=item B<Ctrl-a s>  
+
+Enter send text mode. This allows you to send preset strings to all active windows.
+Strings are:
+
+=back
+
+=over 8
+
+=item B<h>
+
+The B<hostname> string, as passed to the ssh command. This excludes any B<user@>
+and B<:port> parts.
+
+=item B<c>
+
+The connection string containing B<user@>, B<hostname> and B<:port> if they were 
+specified.
+
+=back
 
 =head1 CONFIGURATION FILES
 
