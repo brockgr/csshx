@@ -26,7 +26,7 @@ use POSIX qw(uname);
 
 my @config_keys = qw(
     color_disabled color_master_background
-    color_setbounds
+    color_setbounds ssh_args
     color_selected color_master_foreground
     config help launchpid login man master
     master_height screen_bounds screen debug
@@ -45,6 +45,7 @@ sub new {
         master_height           => 87, # Pixels
         screen                  => 0,
         debug                   => 0,
+        ssh_args                => '',
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -54,10 +55,10 @@ sub new {
     $obj->load_csshrc($_) foreach ("/etc/csshrc", "$ENV{HOME}/.csshrc");
 
     GetOptions($obj, 
-        "config|c=s@", "login|l=s",   "master",      "slave",
-        "sock=s",      "slavehost=s", "launchpid=s", "slaveid=s",
-        "screen=s",    "debug:+",
-        "help|h",      "man|m",       "version|v",
+        "config|c=s@", "login|l=s",    "master",      "slave",
+        "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
+        "screen=s",    "ssh_args=s",   "debug:+",
+        "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     $obj->load_csshrc($_) foreach @{$obj->{config}};
@@ -691,7 +692,7 @@ sub new {
         $slave_id++;
         my $slave_windowid = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
-            '--debug', $config->debug,
+            '--ssh_args', $config->ssh_args, '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
         ) || next;
@@ -726,6 +727,7 @@ package CsshX::Slave;
 use base qw(CsshX::Socket::Selectable);
 use base qw(CsshX::Window::Slave);
 use base qw(CsshX::Process);
+use Text::ParseWords qw(shellwords);
 
 my $TIOCSTI = 0x80017472; # 10.4/10.5
 
@@ -756,7 +758,7 @@ sub new {
 
         # Extract port from hostname:port
 
-        exec( 'ssh',
+        exec( 'ssh', shellwords($config->ssh_args),
             $config->login ? ('-l', $config->login) : (),
             $port          ? ('-p', $port)          : (),
             $host
@@ -1116,6 +1118,7 @@ my $modes = {
                     $slave->open_window(
                         $script, '--slave', '--sock', $sock, 
                         '--slavehost', $hostname, '--slaveid', $slaveid,
+                        '--ssh_args', $config->ssh_args, '--debug', $config->debug,
                         $login  ? ( '--login',    $login  ) :(),
                         (map { ('--config', $_) } @config),
                     );
@@ -1369,16 +1372,22 @@ Full program man page
 
 Displays the version of csshX
 
+=item B<--screen> I<number>
+
+Sets the screen on which to display the terminals, if you have multiple monitors.
+Default: I<0>  (Main window)
+
+=item B<--ssh_args> I<ssh arguements>
+
+Set's a list of arguements to pass to the B<ssh> binary when run. If there are
+more than one, they must be quoted or escaped to prevent B<csshX> from 
+interpreting them.
+
 =item B<--sock> I<sockfile>
 
 Sets the unix domain socket filename to be used for interprocess communication.
 This may be set by the user in the launcher session, possibly for security
 reasons.
-
-=item B<--screen> I<number>
-
-Sets the screen on which to display the terminals, if you have multiple monitors.
-Default: I<0>  (Main window)
 
 =item B<--debug> I<number>
 
@@ -1615,6 +1624,11 @@ terminal windows. Default is the actual screen size. Format is:
 
 (csshX only) The screen number which to draw the terminal windows.
 See --screen in L<OPTIONS>
+
+=itme B<ssh_args>
+
+Arguements to be passed when B<ssh> is run.
+See --ssh_args in L<OPTIONS>
 
 =item B<debug>
 
