@@ -1625,7 +1625,7 @@ terminal windows. Default is the actual screen size. Format is:
 (csshX only) The screen number which to draw the terminal windows.
 See --screen in L<OPTIONS>
 
-=itme B<ssh_args>
+=item B<ssh_args>
 
 Arguements to be passed when B<ssh> is run.
 See --ssh_args in L<OPTIONS>
