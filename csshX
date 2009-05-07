@@ -60,7 +60,7 @@ sub new {
         "config|c=s@", "login|l=s",    "master",      "slave",
         "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
         "tile_x|x=i",  "tile_y|y=i",
-        "screen=s",    "ssh_args=s",   "debug:+",
+        "screen=i",    "ssh_args=s",   "debug:+",
         "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
