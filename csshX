@@ -948,8 +948,6 @@ my $modes = {
             my ($obj, $buffer) = @_;
         
             while (length $buffer) {
-                $buffer =~ s/\r\n/\n/; # Remove carriage returns (^m)
-
                 if ($buffer =~ s/^\e//) {
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^[a\001]//) {
@@ -977,7 +975,7 @@ my $modes = {
                     $x = $slaves if $x > $slaves;
                     $config->set('tile_x', $x);
                     $obj->master->arrange_windows;
-                } elsif ($buffer =~ s/^G//) {
+                } elsif ($buffer =~ s/^n//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->set_disabled(0);
                     }
