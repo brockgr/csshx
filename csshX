@@ -990,10 +990,6 @@ my $modes = {
                 } elsif ($buffer =~ s/^m//) {
                     $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
                     return $obj->set_mode_and_parse('input', $buffer);
-                } elsif ($buffer =~ s/^\015//) {
-                    $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
-                    $obj->master->minimise;
-                    return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^h//) {
                     $_->hide foreach (CsshX::Master::Socket::Slave->slaves);
                     return $obj->set_mode_and_parse('input', $buffer);
@@ -1471,10 +1467,6 @@ Decrease the number of grid columns used for tiling windows
 =item B<Ctrl-a m>  
 
 Minimise all windows. (Use retile to restore)
-
-=item B<Ctrl-a Ctrl-m>  
-
-Minimise all windows and the master window.
 
 =item B<Ctrl-a h>  
 
