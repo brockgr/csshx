@@ -26,7 +26,7 @@ use POSIX qw(uname);
 
 my @config_keys = qw(
     color_disabled color_master_background
-    color_setbounds ssh_args
+    tile_x tile_y color_setbounds ssh_args
     color_selected color_master_foreground
     config help launchpid login man master
     master_height screen_bounds screen debug
@@ -45,6 +45,8 @@ sub new {
         master_height           => 87, # Pixels
         screen                  => 0,
         debug                   => 0,
+        tile_x                  => 0,
+        tile_y                  => 0,
         ssh_args                => '',
         clusters => {}
     }, ref($pack) || $pack;
@@ -57,6 +59,7 @@ sub new {
     GetOptions($obj, 
         "config|c=s@", "login|l=s",    "master",      "slave",
         "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
+        "tile_x|x=i",  "tile_y|y=i",
         "screen=s",    "ssh_args=s",   "debug:+",
         "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
@@ -148,6 +151,11 @@ foreach my $prop (@config_keys) {
 }
 
     
+sub set {
+    my ($obj, $prop, $val) = @_;
+    $obj->{$prop} = $val;
+}
+
 sub pod { shift; pod2usage(@_) }
     
 
@@ -579,27 +587,34 @@ sub grid {
     my $master_height = $config->master_height;
     my $bounds = $master->screen_bounds;
 
-    my $rows = ceil(@windows ** 0.5);
+    my $cols = ceil(@windows ** 0.5);
 
-    my $best_rows = $rows;
-    my $best_score = $rows;
+    if ($config->tile_x) {
+        $cols = $config->tile_x;
+    } elsif ($config->tile_y) {
+        $cols = ceil(@windows / $config->tile_y);
+    } else {
+        my $best_cols = $cols;
+        my $best_score = $cols;
 
-    foreach my $n (0,-1,1,-2,2) {
-        my $mod = @windows % ($rows+$n);
-        if ($mod == 0) {
-            $best_rows = $rows+$n;
-            last;
-        } else {
-            my $score = $rows+$n-$mod;
-            if ($score < $best_score) {
-                $best_score = $score;
-                $best_rows = $rows+$n;
-            } 
+        foreach my $n (0,-1,1) {
+            my $mod = @windows % ($cols+$n);
+            if ($mod == 0) {
+                $best_cols = $cols+$n;
+                last;
+            } else {
+                my $score = $cols+$n-$mod;
+                if ($score < $best_score) {
+                    $best_score = $score;
+                    $best_cols = $cols+$n;
+                } 
+            }
         }
+        $cols = $best_cols;
+        $config->set('tile_x', $cols);
     }
-    $rows = $best_rows;
 
-    my $cols   = ceil(@windows / $rows);
+    my $rows   = ceil(@windows / $cols);
 
     my $width  = int($bounds->{w} / $cols);
     my $height = int(($bounds->{h} - $master_height) / $rows);
@@ -682,6 +697,7 @@ sub new {
     my $master_windowid = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$,
         '--screen', $config->screen, '--debug', $config->debug,
+        '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
     ) || die "Master window failed to open";
@@ -926,11 +942,14 @@ my $modes = {
     'action' => {
         prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
         "[c]reate windwow, [r]etile, [e]nable/disable input, e[n]able all, ".
-        "[t]oggle enabled, [m]inimse, [h]ide, change [b]ounds, e[x]it\r\n",
+        "[t]oggle enabled, [m]inimse, [h]ide, change [b]ounds, ".
+        "chan[g]e [G]rid, e[x]it\r\n",
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
         
             while (length $buffer) {
+                $buffer =~ s/\r\n/\n/; # Remove carriage returns (^m)
+
                 if ($buffer =~ s/^\e//) {
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^[a\001]//) {
@@ -947,7 +966,18 @@ my $modes = {
                     return $obj->set_mode_and_parse('bounds', $buffer);
                 } elsif ($buffer =~ s/^s//) {
                     return $obj->set_mode_and_parse('sendstring', $buffer);
-                } elsif ($buffer =~ s/^n//) {
+                } elsif ($buffer =~ s/^G//) {
+                    my $x = $config->tile_x - 1;
+                    $x = 1 if $x < 1;
+                    $config->set('tile_x', $x);
+                    $obj->master->arrange_windows;
+                } elsif ($buffer =~ s/^g//) {
+                    my $x = $config->tile_x + 1;
+                    my $slaves = scalar CsshX::Master::Socket::Slave->slaves;
+                    $x = $slaves if $x > $slaves;
+                    $config->set('tile_x', $x);
+                    $obj->master->arrange_windows;
+                } elsif ($buffer =~ s/^G//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->set_disabled(0);
                     }
@@ -1377,6 +1407,15 @@ Displays the version of csshX
 Sets the screen on which to display the terminals, if you have multiple monitors.
 Default: I<0>  (Main window)
 
+=item B<-y>, B<--tile_x> I<number>
+
+(csshX only) The number of columns to use when tiling windows.
+
+=item B<-x>, B<--tile_y> I<number>
+
+(csshX only) The number of rows to use when tiling windows.
+B<tile_x> will be use if both are specified.
+
 =item B<--ssh_args> I<ssh arguements>
 
 Set's a list of arguements to pass to the B<ssh> binary when run. If there are
@@ -1420,6 +1459,14 @@ Sends a Control a (\001) character to all enabled terminals.
 =item B<Ctrl-a r>  
 
 Retiles all windows. Also unminimises, unhides and brings windows to front.
+
+=item B<Ctrl-a g>
+
+Increase the number of grid columns used for tiling windows
+
+=item B<Ctrl-a G>
+
+Decrease the number of grid columns used for tiling windows
 
 =item B<Ctrl-a m>  
 
@@ -1612,6 +1659,18 @@ Default: I<{37779,37779,37779}> (Mid-grey)
 
 (csshX only) The background for a selected window in window selection mode.
 Default: I<{17990,35209,53456}> (Mid-blue)
+
+=item B<tile_x>
+
+(csshX only) The number of columns to use when tiling windows.
+Default: I<0> (auto-tile)
+
+
+=item B<tile_y>
+
+(csshX only) The number of rows to use when tiling windows.
+B<tile_x> will be use if both are specified.
+Default: I<0> (auto-tile)
 
 =item B<screen_bounds>
 
