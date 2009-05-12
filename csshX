@@ -244,8 +244,18 @@ sub script { DoAppleScript($_[1]) };
 
 sub open_window {
     my ($pack, @args) = @_;
+
+    # Quote the command arguements
     my $cmd = join ' ', map { s/(["'])/\$1/g; "'$_'" } @args;
-    $cmd = "exec $cmd" unless $config->debug;
+
+    # don't exec if debugging so we can see errors
+    $cmd = "clear && exec $cmd" unless $config->debug;
+
+    # Hide the command from any shell history
+    $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if $ENV{SHELL} =~ m{/(ba)?sh$};
+    # TODO - (t)csh, ksh, zsh 
+
+
     my $window_id = $pack->script('
         tell application "Terminal.app"
             do script "'.$cmd.'"
