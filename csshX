@@ -1411,11 +1411,11 @@ Displays the version of csshX
 Sets the screen on which to display the terminals, if you have multiple monitors.
 Default: I<0>  (Main window)
 
-=item B<-y>, B<--tile_x> I<number>
+=item B<-x>, B<--tile_x> I<number>
 
 (csshX only) The number of columns to use when tiling windows.
 
-=item B<-x>, B<--tile_y> I<number>
+=item B<-y>, B<--tile_y> I<number>
 
 (csshX only) The number of rows to use when tiling windows.
 B<tile_x> will be use if both are specified.
