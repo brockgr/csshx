@@ -781,14 +781,16 @@ sub new {
         $|=1;
         $pack->clear();
         $pack->title($config->slavehost);
+        $user ||= $config->login;
 
-        # Extract port from hostname:port
-
-        exec( 'ssh', shellwords($config->ssh_args),
-            $config->login ? ('-l', $config->login) : (),
-            $port          ? ('-p', $port)          : (),
+        my @cmd = ('ssh', shellwords($config->ssh_args),
+            $user ? ('-l', $user) : (),
+            $port ? ('-p', $port) : (),
             $host
-        ) || die $!;
+        );
+        
+        print join(" ", @cmd)."\n" if $config->debug;
+        exec(@cmd) || die $!;
     }
 }
 
