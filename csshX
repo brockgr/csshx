@@ -12,7 +12,9 @@
 use strict;
 use warnings;
 
-our $VERSION = 0.62;
+our $VERSION  = 0.62;
+our $REVISION = '$Rev$';
+
 
 my $config; # Global configuration object..
 
