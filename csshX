@@ -112,8 +112,10 @@ sub load_csshrc {
     close($fh);
 
     foreach my $cluster (@clusters) {
-        if (my @hosts = split /\s+/, $settings{$cluster}) {
-            $obj->{clusters}->{$cluster} = \@hosts;
+        if (defined(my $cluster_hosts = $settings{$cluster})) {
+            $obj->{clusters}->{$cluster} = [split /\s+/, $cluster_hosts];
+        } else {
+            warn "No hosts defined for cluster [$cluster] in [$config_file]";
         }
     }
     foreach my $key (@config_keys) {
