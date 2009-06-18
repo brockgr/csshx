@@ -1579,6 +1579,10 @@ Revert to previous bounds.
 
 Reset to default screen (or configuration file) bounds.
 
+=item B<f>
+
+Set to bounds to fill screen.
+
 =item B<p>
 
 Print the bounds to the screen in a suitable format for pasting into your csshrc.
