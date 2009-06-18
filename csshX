@@ -12,8 +12,8 @@
 use strict;
 use warnings;
 
-our $VERSION  = 0.62;
-our $REVISION = '$Rev$';
+our $VERSION  = 0.63;
+(our $REVISION = '$Rev$') =~ s/\D//g;
 
 
 my $config; # Global configuration object..
@@ -1366,12 +1366,12 @@ $config = CsshX::Config->new;
 eval "use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }"
     if $config->debug;
 
-if    ($config->help)    { $config->pod(-verbose => 1)           }
-elsif ($config->man)     { $config->pod(-verbose => 2)           }
-elsif ($config->version) { die sprintf "csshX v%.2f\n", $VERSION }
-elsif ($config->master)  { CsshX::Master->new()                  }
-elsif ($config->slave)   { CsshX::Slave->new()                   }
-else                     { CsshX::Launcher->new()                }
+if    ($config->help)    { $config->pod(-verbose => 1)                     }
+elsif ($config->man)     { $config->pod(-verbose => 2)                     }
+elsif ($config->version) { die sprintf "csshX v%.2f-$REVISION\n", $VERSION }
+elsif ($config->master)  { CsshX::Master->new()                            }
+elsif ($config->slave)   { CsshX::Slave->new()                             }
+else                     { CsshX::Launcher->new()                          }
 
 #
 # vim: expandtab sw=4 ts=4 sts=4:
