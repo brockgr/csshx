@@ -313,31 +313,39 @@ sub screen_bounds {
     } elsif ($config->screen_bounds) {
         ($x,$y,$w,$h) = @{$config->screen_bounds};
     } else {
-        $config->screen;
-        my $appkit = NSBundle->alloc->init->initWithPath_(
+        my $scr = $config->screen;
+        ($x,$y,$w,$h) = physical_screen_bounds($scr);
+    }
+    $max_bounds = { x => $x, y => $y, w => $w, h => $h };
+    return $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+}
+
+my $appkit;
+sub physical_screen_bounds { 
+    my ($scr) = @_;
+
+    unless ($appkit) {
+        $appkit = NSBundle->alloc->init->initWithPath_(
             '/System/Library/Frameworks/AppKit.framework'
         );
         $appkit->load && $appkit->isLoaded || die "AppKit failed to load";
         @NSScreen::ISA = 'PerlObjCBridge';
-
-        my $scr = $config->screen;
-        my $displays =  NSScreen->screens()->count -1;
-        die "No such screen [$scr], screen must be $displays or less"
-            if ($scr > $displays);
-
-        my $frame =  perlValue(NSValue->valueWithRect_(
-            NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
-
-        if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {
-            ($x,$y,$w,$h) = ($1,$2,$3,$4); # 10.5 style
-        } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) {
-            ($x,$y,$w,$h) = map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4);
-        } else {
-            die "Can't decode bounds [$frame]";
-        }
     }
-    $max_bounds = { x => $x, y => $y, w => $w, h => $h };
-    return $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+
+    my $displays =  NSScreen->screens()->count -1;
+    die "No such screen [$scr], screen must be $displays or less"
+        if ($scr > $displays);
+
+    my $frame =  perlValue(NSValue->valueWithRect_(
+        NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
+
+    if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {
+        return($1,$2,$3,$4); # 10.5 style
+    } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) {
+        return(map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4));
+    } else {
+        die "Can't decode bounds [$frame]";
+    }
 }
 
 sub reset_bounds {
@@ -346,6 +354,11 @@ sub reset_bounds {
     my $y = $max_bounds->{y};
     my $w = $max_bounds->{w};
     my $h = $max_bounds->{h};
+    $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+}
+
+sub max_bounds {
+    my ($x,$y,$w,$h) = physical_screen_bounds($config->screen);
     $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
 }
 
@@ -1027,7 +1040,7 @@ my $modes = {
     'bounds' => {
         prompt => "Move and resize master to define bounds: (Enter to accept, ".
         "Esc to cancel)\r\n".
-        "[r]eset to default, [p]rint current bounds",
+        "[r]eset to default, [f]ull screen, [p]rint current bounds",
         onchange => sub {
             my ($obj) = @_;
             $obj->master->format_resize;
@@ -1055,6 +1068,9 @@ my $modes = {
                     print "\r\n\r\nscreen_bounds = {".
                         join(", ",@{$b}{qw(x y w h)})
                     ."}\r\n";
+                } elsif ($buffer =~ s/^f//) {
+                    $obj->master->max_bounds;
+                    $obj->master->size_as_bounds;
                 } else {
                     substr($buffer, 0, 1, '');
                     print "\007";
