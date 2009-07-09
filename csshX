@@ -970,8 +970,8 @@ my $modes = {
     },
     'action' => {
         prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
-        "[c]reate windwow, [r]etile, [e]nable/disable input, e[n]able all, ".
-        "[t]oggle enabled, [m]inimse, [h]ide, change [b]ounds, ".
+        "[c]reate window, [r]etile, [e]nable/disable input, e[n]able all, ".
+        "[t]oggle enabled, [m]inimse, [h]ide, [s]end text, change [b]ounds, ".
         "chan[g]e [G]rid, e[x]it\r\n",
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
