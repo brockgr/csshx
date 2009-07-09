@@ -259,7 +259,7 @@ sub get_shell {
                 $term = $termStr->UTF8String;
             }
         } else {
-            my $set = $defs->stringForKey_("Startup Window Settings");
+            my $set = $defs->stringForKey_("Default Window Settings");
             my $dict = $defs->dictionaryForKey_("Window Settings");
             if ($set && $$set && $dict && $$dict) {
                 my $subdict = $dict->objectForKey_($set);
