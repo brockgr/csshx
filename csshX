@@ -246,6 +246,39 @@ my ($cur_bounds, $max_bounds);
 
 sub script { DoAppleScript($_[1]) };
 
+sub get_shell {
+    my $term;
+
+    # Check Terminal.app settings
+    if (my $defs = NSUserDefaults->alloc->init) {
+        $defs->addSuiteNamed_("com.apple.terminal");
+
+        if ($config->osver =~ /^10.4/) {
+            my $termStr = $defs->stringForKey_("Shell");
+            if ($termStr && $$termStr) {
+                $term = $termStr->UTF8String;
+            }
+        } else {
+            my $set = $defs->stringForKey_("Startup Window Settings");
+            my $dict = $defs->dictionaryForKey_("Window Settings");
+            if ($set && $$set && $dict && $$dict) {
+                my $subdict = $dict->objectForKey_($set);
+                if ($subdict && $$subdict) {
+                    my $termStr = $subdict->objectForKey_("CommandString");
+                    if ($termStr && $$termStr) {
+                        $term = $termStr->UTF8String;
+                    }
+                }
+            }
+        }
+    }
+
+    # else try the 'passwd' file
+    $term ||= (getpwuid "$>")[8];
+
+    return $term;
+}
+
 sub open_window {
     my ($pack, @args) = @_;
 
@@ -256,7 +289,7 @@ sub open_window {
     $cmd = "clear && exec $cmd" unless $config->debug;
 
     # Hide the command from any shell history
-    $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if $ENV{SHELL} =~ m{/(ba)?sh$};
+    $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
     # TODO - (t)csh, ksh, zsh 
 
 
