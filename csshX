@@ -27,9 +27,10 @@ use Getopt::Long;
 use POSIX qw(uname);
 
 my @config_keys = qw(
-    color_disabled color_master_background
+    color_selected_foreground color_selected_background
+    color_disabled_foreground color_disabled_background
+    color_master_background color_master_foreground
     tile_x tile_y color_setbounds ssh_args
-    color_selected color_master_foreground
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
@@ -39,17 +40,19 @@ sub new {
     my ($pack) = @_;
     
     bless my $obj = {
-        color_disabled          => '{37779,37779,37779}',
-        color_selected          => '{17990,35209,53456}',
-        color_master_background => '{38036,0,0}',
-        color_master_foreground => '{65535,65535,65535}',
-        color_setbounds         => '{17990,35209,53456}',
-        master_height           => 87, # Pixels
-        screen                  => 0,
-        debug                   => 0,
-        tile_x                  => 0,
-        tile_y                  => 0,
-        ssh_args                => '',
+        color_disabled_background => '',
+        color_disabled_foreground => '{37779,37779,37779}',
+        color_selected_background => '{17990,35209,53456}',
+        color_selected_foreground => '',
+        color_master_background   => '{38036,0,0}',
+        color_master_foreground   => '{65535,65535,65535}',
+        color_setbounds           => '{17990,35209,53456}',
+        master_height             => 87, # Pixels
+        screen                    => 0,
+        debug                     => 0,
+        tile_x                    => 0,
+        tile_y                    => 0,
+        ssh_args                  => '',
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -246,6 +249,8 @@ my ($cur_bounds, $max_bounds);
 
 sub script { DoAppleScript($_[1]) };
 
+sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
+
 sub get_shell {
     my $term;
 
@@ -255,9 +260,7 @@ sub get_shell {
 
         if ($config->osver =~ /^10.4/) {
             my $termStr = $defs->stringForKey_("Shell");
-            if ($termStr && $$termStr) {
-                $term = $termStr->UTF8String;
-            }
+            $term = perlValue($termStr->UTF8String);
         } else {
             my $set = $defs->stringForKey_("Default Window Settings");
             my $dict = $defs->dictionaryForKey_("Window Settings");
@@ -265,9 +268,7 @@ sub get_shell {
                 my $subdict = $dict->objectForKey_($set);
                 if ($subdict && $$subdict) {
                     my $termStr = $subdict->objectForKey_("CommandString");
-                    if ($termStr && $$termStr) {
-                        $term = $termStr->UTF8String;
-                    }
+                    $term = perlValue($termStr->UTF8String);
                 }
             }
         }
@@ -292,7 +293,6 @@ sub open_window {
     $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
     # TODO - (t)csh, ksh, zsh 
 
-
     my $window_id = $pack->script('
         tell application "Terminal.app"
             do script "'.$cmd.'"
@@ -309,33 +309,62 @@ sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
 sub windowid      { *{$_[0]}->{windowid};         }
 
 sub set_color {
-    my ($obj, $type, $color) = @_;
-    $obj->script(
-        'tell application "Terminal.app" to set '.$type.
-        ' color of '.$obj->windowid.' to '.$color
-    );
+    my ($obj, $bg_color, $fg_color) = @_;
+
+    if ($bg_color) {
+        $obj->script(
+            'tell application "Terminal" to set background color of '.
+            $obj->windowid.' to '.$bg_color
+        );
+    }
+    if ($fg_color) {
+        $obj->script(
+            'tell application "Terminal" to set normal text color of '.
+            $obj->windowid.' to '.$fg_color
+        );
+        $obj->script(
+            'tell application "Terminal" to set bold text color of '.
+            $obj->windowid.' to '.$fg_color
+        );
+    }
+
+    # Need to redo this on buggy 10.4 only
     $obj->script('
-        tell application "Terminal.app" to set background color of '.
+        tell application "Terminal" to set background color of '.
         $obj->windowid.' to background color of '.$obj->windowid
-   ) if (($type ne 'background') && ($config->osver =~ /^10.4/));
+   ) if (($fg_color) && ($config->osver =~ /^10.4/));
 }
 
+
 sub store_color {
-    my ($obj, $type) = @_;
-    *$obj->{$type.'_color'} = $obj->script(
-        'tell application "Terminal" to return '.$type.
-        ' color of '.$obj->windowid
-    ) unless defined *$obj->{$type.'_color'};
+    my ($obj, $bg, $fg) = @_;
+    *$obj->{'stored_color'} ||= {};
+    if ($bg) {
+        *$obj->{'stored_color'}->{bg} = $obj->script(
+            'tell application "Terminal" to return background'.
+            ' color of '.$obj->windowid
+        );
+    }
+
+    if ($fg) {
+        *$obj->{'stored_color'}->{fg} = $obj->script(
+            'tell application "Terminal" to return normal text'.
+            ' color of '.$obj->windowid
+        );
+    }
 }
+
+sub stored_color { *{$_[0]}->{'stored_color'} || {}; }
 
 sub restore_color {
     my ($obj, $type) = @_;
-    $obj->set_color($type, *$obj->{$type.'_color'})
-        if defined *$obj->{$type.'_color'};
-    *$obj->{$type.'_color'} = undef;
+    if (my $store = *$obj->{'stored_color'}) {
+        $obj->set_color(
+            *$obj->{'stored_color'}->{bg} || '',
+            *$obj->{'stored_color'}->{fg} || ''
+        );
+    }
 }
-
-sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
 
 sub screen_bounds { 
     my ($obj) = @_;
@@ -545,38 +574,72 @@ use POSIX qw(ceil);
 my $slaveids_by_location = [];
 my $current_selection = [0,0];
 
-sub disabled      { *{$_[0]}->{disabled};         }
+sub disabled      { *{$_[0]}->{disabled}; }
 sub set_disabled  {
     my ($obj, $value) = @_;
-    (*$obj->{disabled}=$value) ?  $obj->format_disabled : $obj->format_enabled;
+    $value ?  $obj->format_disabled : $obj->format_enabled;
+    *$obj->{disabled} = $value;
 }
 
-sub selected      { *{$_[0]}->{selected};         }
+sub selected      { *{$_[0]}->{selected}; }
 sub set_selected  {
     my ($obj, $value) = @_;
-    (*$obj->{selected}=$value) ?  $obj->format_selected : $obj->format_unselected;
+    $value ?  $obj->format_selected : $obj->format_unselected;
+    *$obj->{selected} = $value;
 }
 
 sub format_selected {
-    $_[0]->store_color('background');
-    $_[0]->set_color('background', $config->color_selected);
+    my $bg_color =
+        $config->color_selected_background ||
+        ($_[0]->disabled && $config->color_disabled_background) ||
+        $_[0]->stored_color->{bg} ||
+        '';
+    my $fg_color =
+        $config->color_selected_foreground ||
+        ($_[0]->disabled && $config->color_disabled_foreground) ||
+        $_[0]->stored_color->{fg} ||
+        '';
+    $_[0]->store_color($bg_color, $fg_color) unless $_[0]->disabled;
+    $_[0]->set_color($bg_color, $fg_color);
 }
 
 sub format_unselected {
-    $_[0]->restore_color('background');
+    my $bg_color =
+        ($_[0]->disabled && $config->color_disabled_background) ||
+        $_[0]->stored_color->{bg} ||
+        '';
+    my $fg_color =
+        ($_[0]->disabled && $config->color_disabled_foreground) ||
+        $_[0]->stored_color->{fg} ||
+        '';
+    $_[0]->set_color($bg_color, $fg_color);
 }
 
-sub format_enabled {
-    foreach ('normal text', 'bold_text') {
-        $_[0]->restore_color($_)
-    }
+sub format_disabled {
+    my $bg_color =
+        ($_[0]->selected && $config->color_selected_background) ||
+        $config->color_disabled_background ||
+        $_[0]->stored_color->{bg} ||
+        '';
+    my $fg_color =
+        ($_[0]->selected && $config->color_selected_foreground) ||
+        $config->color_disabled_foreground ||
+        $_[0]->stored_color->{fg} ||
+        '';
+    $_[0]->store_color($bg_color, $fg_color) unless $_[0]->selected;
+    $_[0]->set_color($bg_color, $fg_color);
 };
 
-sub format_disabled {
-    foreach ('normal text', 'bold_text') {
-        $_[0]->store_color($_);
-        $_[0]->set_color($_, $config->color_disabled);
-    }
+sub format_enabled {
+    my $bg_color =
+        ($_[0]->selected && $config->color_selected_background) ||
+        $_[0]->stored_color->{bg} ||
+        '';
+    my $fg_color =
+        ($_[0]->selected && $config->color_selected_foreground) ||
+        $_[0]->stored_color->{fg} ||
+        '';
+    $_[0]->set_color($bg_color, $fg_color);
 };
 
 sub get_by_location {
@@ -1709,15 +1772,25 @@ bounds setting mode. Default I<{17990,35209,53456}> (Mid-blue)
 
 (csshX only) The height of the master window. Default: I<87> pixels
 
-=item B<color_disabled>
+=item B<color_disabled_background>
+
+(csshX) The background color for a disabled window.
+Defualt: Nothing
+
+=item B<color_disabled_foreground>
 
 (csshX only) The foreground font color for a disabled window.
 Default: I<{37779,37779,37779}> (Mid-grey)
 
-=item B<color_selected>
+=item B<color_selected_background>
 
 (csshX only) The background for a selected window in window selection mode.
 Default: I<{17990,35209,53456}> (Mid-blue)
+
+=item B<color_selected_foreground>
+
+(csshX only) The foreground for a selected window in window selection mode.
+Default: Nothing
 
 =item B<tile_x>
 
