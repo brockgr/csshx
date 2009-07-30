@@ -30,7 +30,8 @@ my @config_keys = qw(
     color_selected_foreground color_selected_background
     color_disabled_foreground color_disabled_background
     color_master_background color_master_foreground
-    tile_x tile_y color_setbounds ssh_args
+    color_setbounds_background color_setbounds_foreground
+    tile_x tile_y ssh_args
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
@@ -40,19 +41,20 @@ sub new {
     my ($pack) = @_;
     
     bless my $obj = {
-        color_disabled_background => '',
-        color_disabled_foreground => '{37779,37779,37779}',
-        color_selected_background => '{17990,35209,53456}',
-        color_selected_foreground => '',
-        color_master_background   => '{38036,0,0}',
-        color_master_foreground   => '{65535,65535,65535}',
-        color_setbounds           => '{17990,35209,53456}',
-        master_height             => 87, # Pixels
-        screen                    => 0,
-        debug                     => 0,
-        tile_x                    => 0,
-        tile_y                    => 0,
-        ssh_args                  => '',
+        color_disabled_background  => '',
+        color_disabled_foreground  => '{37779,37779,37779}',
+        color_selected_background  => '{17990,35209,53456}',
+        color_selected_foreground  => '',
+        color_master_background    => '{38036,0,0}',
+        color_master_foreground    => '{65535,65535,65535}',
+        color_setbounds_background => '{17990,35209,53456}',
+        color_setbounds_foreground => '',
+        master_height              => 87, # Pixels
+        screen                     => 0,
+        debug                      => 0,
+        tile_x                     => 0,
+        tile_y                     => 0,
+        ssh_args                   => '',
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -539,15 +541,10 @@ sub format_resize {
     my ($obj) = @_;
     my $windowid = $obj->windowid;
 
-    my $bg = $config->color_setbounds;
+    my $bg_color = $config->color_setbounds_background;
+    my $fg_color = $config->color_setbounds_foreground;
     
-    $obj->script('
-       tell application "Terminal.app"
-            try
-                set background color of '.$windowid.' to '.$bg.'
-            end try
-        end tell
-    ');
+    $obj->set_color($bg_color, $fg_color);
 }
 
 sub size_as_bounds {
@@ -1923,13 +1920,18 @@ master window. Default: I<{38036,0,0}> (dark red)
 
 =item B<color_master_foreground>
 
-(csshX only) The applescript color identifier for the foreground font  of the
+(csshX only) The applescript color identifier for the foreground font of the
 master window. Default: I<{65535,65535,65535}> (white)
 
-=item B<color_setbounds>
+=item B<color_setbounds_background>
 
 (csshX only) The applescript color identifier for the background color in
 bounds setting mode. Default I<{17990,35209,53456}> (Mid-blue)
+
+=item B<color_setbounds_foreground>
+
+(csshX only) The applescript color identifier for the foreground font in
+bounds setting mode. Default: Nothing
 
 =item B<master_height>
 
