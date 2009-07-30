@@ -568,7 +568,7 @@ sub size_as_bounds {
             end try
         end tell
     ');
-};
+}
 
 sub bounds_as_size {
     my ($obj) = @_;
@@ -789,11 +789,42 @@ sub grid {
                 end tell
             end ignoring
         ');
+        *$window->{zoomed} = 0;
 
         push @{$slaveids_by_location->[-1]}, $slaveid;
+
         $x += $width;
     }
 }
+
+sub zoom {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+    my $masterid = $obj->master->windowid;
+
+    my $bounds = $obj->screen_bounds;
+    my $x = $bounds->{x};
+    my $y = $bounds->{y};
+    my $w = $bounds->{w};
+    my $h = $bounds->{h};
+    my $mh = $config->master_height;
+
+    $obj->script('
+       tell application "Terminal.app"
+            try
+                set miniaturized of '.$windowid.' to false
+                set size of '.$windowid.' to { '.$w.', '.($h-$mh).' }
+                set origin of '.$windowid.' to { '.$x.', '.($y+$mh).' }
+                set frontmost of '.$windowid.' to true
+                set frontmost of '.$masterid.' to true
+            end try
+        end tell
+    ');
+
+    *$obj->{zoomed} = 1;
+}
+
+sub zoomed { *{$_[0]}->{zoomed} };
 
 
 #==============================================================================#
@@ -1240,21 +1271,21 @@ my $modes = {
                     CsshX::Window::Slave->select_move(0,-1);
                 } elsif ($buffer =~ s/^(j|\e\[B)//) {
                     CsshX::Window::Slave->select_move(0,1);
-                } elsif ($buffer =~ s/^\e//) {
+                } elsif ($buffer =~ s/^[\e\r]//) {
                     CsshX::Window::Slave->selection_off;
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^d//) {
                     if (my $window = CsshX::Window::Slave->selected_window()) {
                         $window->set_disabled(1);
-                    };
+                    }
                 } elsif ($buffer =~ s/^e//) {
                     if (my $window = CsshX::Window::Slave->selected_window()) {
                         $window->set_disabled(0);
-                    };
+                    }
                 } elsif ($buffer =~ s/^t//) {
                     if (my $window = CsshX::Window::Slave->selected_window()) {
                         $window->set_disabled(!$window->disabled);
-                    };
+                    }
                 } elsif ($buffer =~ s/^o//) {
                     if (my $selected = CsshX::Window::Slave->selected_window()) {
                         foreach my $window (CsshX::Master::Socket::Slave->slaves) {
@@ -1263,7 +1294,17 @@ my $modes = {
                         $selected->set_disabled(0);
                         CsshX::Window::Slave->selection_off;
                         return $obj->set_mode_and_parse('input', $buffer);
-                    };
+                    }
+                } elsif ($buffer =~ s/^O//) {
+                    if (my $selected = CsshX::Window::Slave->selected_window()) {
+                        foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                            $window->set_disabled(1) unless $window == $selected;
+                        }
+                        $selected->set_disabled(0);
+                        CsshX::Window::Slave->selection_off;
+                        $selected->zoom();
+                        return $obj->set_mode_and_parse('input', $buffer);
+                    }
                 } else {
                     substr($buffer, 0, 1, '');
                     print "\007";
