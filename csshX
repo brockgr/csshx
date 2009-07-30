@@ -1282,7 +1282,7 @@ my $modes = {
     },
     'sendstring' => {
         prompt => "Send string to all active windows: (Esc to exit)\r\n".
-        "[h]ostname, [c]onnection string",
+        "[h]ostname, [c]onnection string, window [i]d",
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             while (length $buffer) {
@@ -1296,6 +1296,11 @@ my $modes = {
                         my $str = $window->hostname;
                         $str =~ s/^[^@]+@//; $str =~ s/:[^:]+$//;
                         $window->send_input($str) unless $window->disabled;
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^i//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->send_input($window->slaveid) unless $window->disabled;
                     }
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^\e//) {
@@ -1827,8 +1832,13 @@ and B<:port> parts.
 
 =item B<c>
 
-The connection string containing B<user@>, B<hostname> and B<:port> if they were 
-specified.
+The connection string containing B<user@>, B<hostname> and B<:port> if they
+were specified.
+
+=item B<i>
+
+Send the unique "slave id". Each slave window is assigned a unique number. This
+might be useful if you have multiple windows on the same host.
 
 =back
 
