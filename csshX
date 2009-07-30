@@ -1751,7 +1751,7 @@ Hash '#' can be use for comments.
 Thee default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files 
 can be specified with the B<--config> option on the command line.
 
-Hash '#' can be use for comments.
+Hash '#' can be used at any point in the file for comments.
 
 =over 4
 
@@ -1763,7 +1763,7 @@ A list of clusters of hosts.
     cluster1 = hostname1 hostname2
     cluster2 = hostname3 hostname4
 
-Foreach cluster defined in clusters, an entry
+For each cluster defined in clusters, an entry
 must exist with the host definitions for that cluster.
 
 
@@ -1816,7 +1816,6 @@ Default: Nothing
 
 (csshX only) The number of columns to use when tiling windows.
 Default: I<0> (auto-tile)
-
 
 =item B<tile_y>
 
