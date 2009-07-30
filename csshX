@@ -260,7 +260,7 @@ sub get_shell {
 
         if ($config->osver =~ /^10.4/) {
             my $termStr = $defs->stringForKey_("Shell");
-            $term = perlValue($termStr->UTF8String);
+            $term = perlValue($termStr);
         } else {
             my $set = $defs->stringForKey_("Default Window Settings");
             my $dict = $defs->dictionaryForKey_("Window Settings");
@@ -268,7 +268,7 @@ sub get_shell {
                 my $subdict = $dict->objectForKey_($set);
                 if ($subdict && $$subdict) {
                     my $termStr = $subdict->objectForKey_("CommandString");
-                    $term = perlValue($termStr->UTF8String);
+                    $term = perlValue($termStr);
                 }
             }
         }
