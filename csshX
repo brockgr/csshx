@@ -511,6 +511,26 @@ sub format_master {
             end try
         end tell
     ');
+
+    # Now check the height of the terminal window incase it's larger than expected
+    # If so, move it of the bottom of the screen if possible
+
+    my $real_mh = $obj->script('
+        tell application "Terminal.app"
+            set {w, h} to size of '.$windowid.'
+            return h
+        end tell
+    ');
+
+    if ($real_mh > $mh) {
+        $obj->script('
+            tell application "Terminal.app"
+                try
+                    set origin of '.$windowid.' to { '.$x.', '.($y-($real_mh-$mh)).' }
+                end try
+            end tell
+        ');
+    }
 }
 
 sub format_resize {
