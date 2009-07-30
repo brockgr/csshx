@@ -1706,6 +1706,11 @@ Toggle enable mode for selected window.
 
 Disable all windows except for selected.
 
+=item B<O>  
+
+Zoom selected window and disable all other windows. Use B<Ctrl-a r> to 
+unzooom (and retile) the window.
+
 =item B<Esc>  
 
 Return to input mode.
