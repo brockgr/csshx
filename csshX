@@ -207,10 +207,11 @@ use IO::Select;
 
 sub new {
     my ($pack, @args) = @_;
-    my $obj = $pack->SUPER::new(@args);
-    *$obj->{readers} = IO::Select->new($obj);
-    *$obj->{writers} = IO::Select->new();
-    return $obj;
+    if (my $obj = $pack->SUPER::new(@args)) {
+        *$obj->{readers} = IO::Select->new($obj);
+        *$obj->{writers} = IO::Select->new();
+        return $obj;
+    }
 }
 
 sub readers { *{$_[0]}->{readers} }
@@ -594,6 +595,12 @@ use POSIX qw(ceil);
 my $slaveids_by_location = [];
 my $current_selection = [0,0];
 
+sub location      { @{*{$_[0]}->{location}}; }
+sub set_location  {
+    my ($obj, $x, $y) = @_;
+    *$obj->{location} = [$x,$y];
+}
+
 sub disabled      { *{$_[0]}->{disabled}; }
 sub set_disabled  {
     my ($obj, $value) = @_;
@@ -720,6 +727,41 @@ sub select_move {
     }
 }
 
+sub select_next {
+    my ($obj) = @_;
+
+    my ($curr_x,$curr_y) = $obj->location;
+
+    my $next_obj;
+    my $x = $curr_x + 1;
+    my $y = $curr_y;
+
+    LOOP: while (1) {
+        while ($y < $obj->grid_rows) {
+            while ($x < $obj->grid_cols) {
+                if (($x == $curr_x) && ($y == $curr_y)) {
+                    return; # Not found a next window
+                } elsif ($next_obj = $obj->get_by_location($x,$y)) {
+                    last LOOP;
+                }
+                $x++;
+            }
+            $y++;
+            $x = 0;
+        }
+        $y = 0;
+    }
+
+    
+    
+    $obj->set_disabled(1);
+    if ($obj->zoomed) {
+        $obj->master->arrange_windows;
+        $next_obj->zoom;
+    }
+    $next_obj->set_disabled(0);
+}
+
 sub grid_rows { scalar @{$slaveids_by_location}       }
 sub grid_cols { scalar @{$slaveids_by_location->[0]}  }
 
@@ -792,6 +834,10 @@ sub grid {
         *$window->{zoomed} = 0;
 
         push @{$slaveids_by_location->[-1]}, $slaveid;
+        $window->set_location( 
+            (@{$slaveids_by_location->[-1]}-1),
+            (@$slaveids_by_location-1)
+        );
 
         $x += $width;
     }
@@ -876,6 +922,8 @@ sub new {
         (map { ('--config', $_) } @config),
     ) || die "Master window failed to open";
     $greeting .= "$master_windowid\n";
+
+    # TODO - Should wait until $socket is connectable
 
     my $slave_id = 0;
     foreach my $host (@hosts) {
@@ -1161,6 +1209,12 @@ my $modes = {
                         $window->set_disabled(!$window->disabled);
                     }
                     return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^ //) {
+                    my @enabled = grep {
+                        (! $_->disabled) && $_
+                    } CsshX::Master::Socket::Slave->slaves; 
+                    if (@enabled == 1) { $enabled[0]->select_next(); }
+                    return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^m//) {
                     $_->minimise foreach (CsshX::Master::Socket::Slave->slaves);
                     return $obj->set_mode_and_parse('input', $buffer);
@@ -1443,13 +1497,17 @@ sub terminate {
 
 sub replace_slave {
     my ($obj, $slaveid, $hostname, $windowid) = @_;
+    my $xy;
     if (my $old = $obj->get_by_slaveid($slaveid)) {
         $hostname ||= $old->hostname;
         $windowid ||= $old->windowid;
+        $xy = [$old->location];
+       
     }
     $obj->set_slaveid($slaveid);
     $obj->set_windowid($windowid) if $windowid;
     $obj->set_hostname($hostname) if $hostname;
+    $obj->set_location(@$xy) if $xy;
     $slaves_by_slaveid->{$slaveid} = $obj;
 }
 
