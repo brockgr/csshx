@@ -327,13 +327,14 @@ sub set_color {
             'tell application "Terminal" to set bold text color of '.
             $obj->windowid.' to '.$fg_color
         );
+
+        # Need to redo this on buggy 10.4 only
+        $obj->script('
+            tell application "Terminal" to set background color of '.
+            $obj->windowid.' to background color of '.$obj->windowid
+        ) if ($config->osver =~ /^10.4/);
     }
 
-    # Need to redo this on buggy 10.4 only
-    $obj->script('
-        tell application "Terminal" to set background color of '.
-        $obj->windowid.' to background color of '.$obj->windowid
-   ) if (($fg_color) && ($config->osver =~ /^10.4/));
 }
 
 
@@ -604,6 +605,7 @@ sub set_location  {
 sub disabled      { *{$_[0]}->{disabled}; }
 sub set_disabled  {
     my ($obj, $value) = @_;
+    return if defined(*$obj->{disabled}) && *$obj->{disabled} == $value;
     $value ?  $obj->format_disabled : $obj->format_enabled;
     *$obj->{disabled} = $value;
 }
@@ -611,6 +613,7 @@ sub set_disabled  {
 sub selected      { *{$_[0]}->{selected}; }
 sub set_selected  {
     my ($obj, $value) = @_;
+    return if defined(*$obj->{selected}) && *$obj->{selected} == $value;
     $value ?  $obj->format_selected : $obj->format_unselected;
     *$obj->{selected} = $value;
 }
@@ -756,7 +759,7 @@ sub select_next {
     
     $obj->set_disabled(1);
     if ($obj->zoomed) {
-        $obj->master->arrange_windows;
+        $obj->unzoom;
         $next_obj->zoom;
     }
     $next_obj->set_disabled(0);
@@ -855,10 +858,17 @@ sub zoom {
     my $h = $bounds->{h};
     my $mh = $config->master_height;
 
+    my $orig_size = $obj->script('
+        tell application "Terminal.app" to return size of '.$windowid
+    );
+    
+    my $orig_origin = $obj->script('
+        tell application "Terminal.app" to return origin of '.$windowid
+    );
+
     $obj->script('
        tell application "Terminal.app"
             try
-                set miniaturized of '.$windowid.' to false
                 set size of '.$windowid.' to { '.$w.', '.($h-$mh).' }
                 set origin of '.$windowid.' to { '.$x.', '.($y+$mh).' }
                 set frontmost of '.$windowid.' to true
@@ -867,8 +877,24 @@ sub zoom {
         end tell
     ');
 
-    *$obj->{zoomed} = 1;
+    *$obj->{zoomed} = [ $orig_size, $orig_origin ];;
 }
+
+sub unzoom {
+    my ($obj) = @_;
+    my $windowid = $obj->windowid;
+    my $orig_pos = $obj->zoomed || return;
+
+    $obj->script('
+       tell application "Terminal.app"
+            try
+                set size of '.$windowid.' to '.$orig_pos->[0].'
+                set origin of '.$windowid.' to '.$orig_pos->[1].'
+            end try
+        end tell
+    ');
+}
+
 
 sub zoomed { *{$_[0]}->{zoomed} };
 
@@ -1181,6 +1207,9 @@ my $modes = {
                 } elsif ($buffer =~ s/^c//) {
                     return $obj->set_mode_and_parse('addhost', $buffer);
                 } elsif ($buffer =~ s/^e//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->unzoom;
+                    }
                     return $obj->set_mode_and_parse('enable', $buffer);
                 } elsif ($buffer =~ s/^b//) {
                     return $obj->set_mode_and_parse('bounds', $buffer);
@@ -1199,11 +1228,13 @@ my $modes = {
                     $obj->master->arrange_windows;
                 } elsif ($buffer =~ s/^n//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->unzoom;
                         $window->set_disabled(0);
                     }
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^t//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->unzoom;
                         $window->set_disabled(!$window->disabled);
                     }
                     return $obj->set_mode_and_parse('input', $buffer);
