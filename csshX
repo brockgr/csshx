@@ -923,7 +923,12 @@ sub new {
     ) || die "Master window failed to open";
     $greeting .= "$master_windowid\n";
 
-    # TODO - Should wait until $socket is connectable
+    # Wait for master to be ready
+    for (1..20) {
+        last if $ready;
+        sleep 1;
+    }
+    die "No master" unless $ready;
 
     my $slave_id = 0;
     foreach my $host (@hosts) {
@@ -937,13 +942,6 @@ sub new {
         $greeting .= "$slave_id $slave_windowid\n";
     }
     $greeting .= "done\n";
-
-    # Wait for master to be ready
-    for (1..20) {
-        last if $ready;
-        sleep 1;
-    }
-    die "No master" unless $ready;
 
     my $obj = $pack->SUPER::new($sock) || die $!;
 
