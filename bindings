@@ -1,0 +1,40 @@
+action                  Ctrl-a       # Enters action mode
+
+action_exit             Esc         # Exits action mode
+action_realkey          a Ctrl-a    # Sends key interrupted by "action"
+action_retile           r           # Retiles all windows
+action_addhost          c           # Creates a new slave window
+action_enable           e           # Enter enable mode
+action_bounds           b           # Enter bounds mode
+action_sendstring       s           # Enter sendstring mode
+action_gridmore         g           # Use more columns
+action_gridless         G           # Use less columns
+action_enableall        n           # Enable all slave windows
+action_toggleenable     t           # Toggle enabled windows
+action_enablenext       Space       # Enable next window
+action_minimise         m           # Minimise slave windows
+action_hide             h           # Hide slave windows
+action_tidyup           Ctrl-h      # Hide slave windows and minimise master
+action_exit             x           # Exit csshX
+
+bounds_save             Enter       # Save bounds and return to input
+bounds_cancel           Esc         # Discard bounds and return to input
+bounds_reset            r           # Reset bounds
+bounds_print            p           # Display bounds setting
+bounds_fullscreen       f           # Use full screen
+
+sendstring_exit         Esc         # Exit sendstring mode
+sendstring_connection   c           # Send connection string to all slaves
+sendstring_hostname     h           # Send hostname string to all slaves
+sendstring_slaveid      i           # Send slave id to all slaves
+
+enable_exit             Esc Enter   # Exit enable mode
+enable_selectleft       h Left      # Select slave left
+enable_selectright      l Left      # Select slave right
+enable_selectup         k Up        # Select slave up
+enable_selectdown       j Down      # Select slave down
+enable_disable          d           # Disable selected slave
+enable_enable           e           # Enable selected slave
+enable_toggle           t           # Toggle selected slave
+enable_only             o           # Enable only selected slave
+enable_zoom             z           # Enable only selected slave and zoom
