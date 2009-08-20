@@ -1,4 +1,17 @@
+#!/bin/sh -- # --*-Perl-*--
+# Mad perl detection for broken 64-bit 10.6.0
+for p in perl5.8.9 perl; do
+    if [ -x /usr/bin/$p ]; then
+       exec /usr/bin/$p -x -S $0 ${1+"$@"}; fi
+done
+echo No valid perl found - please submit a bug at http://code.google.com/p/csshx/issues
+echo Please attach the data below:
+echo --------------------
+sw_vers; ls -1 /usr/bin/perl*
+echo --------------------
+exit 255
 #!/usr/bin/perl
+#line 17
 
 #==============================================================================#
 # csshX -- Cluster SSH tool for MacOS-X Termial.app                            #
@@ -1720,7 +1733,7 @@ Use B<Esc> to return to input mode.
 
 =over 4
 
-=item B<Ctrl-a c>  
+=item B<Ctrl-a c>
 
 Open a new terminal and connect to another host. Prompts for hostname. B<Esc> cancels hostname input.
 
