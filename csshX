@@ -1181,7 +1181,7 @@ my $kk = "\e[0m";      # Reset
 my $modes = {
     'input' => {
         prompt => "Input to terminal: (Ctrl-a to enter control mode)\r\n",
-        onchange => sub { system 'stty', 'raw' },
+        onchange => sub { system '/bin/stty', 'raw' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             $buffer =~ s/\033\[([ABCD])/\033O$1/gs; # Convert CSI to SS3 cursor codes
@@ -1413,7 +1413,7 @@ my $modes = {
     },
     'addhost' => {
         prompt => 'Add Host: ',
-        onchange => sub { system 'stty', 'sane' },
+        onchange => sub { system '/bin/stty', 'sane' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             if ($buffer =~ s/^([^\n]*)\e//) {
