@@ -11,7 +11,7 @@ sw_vers; ls -1 /usr/bin/perl*
 echo --------------------
 exit 255
 #!/usr/bin/perl
-#line 17
+#line 15
 
 #==============================================================================#
 # csshX -- Cluster SSH tool for MacOS-X Termial.app                            #
@@ -48,6 +48,7 @@ my @config_keys = qw(
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
+    session_max
 );
 
 sub new {
@@ -68,6 +69,7 @@ sub new {
         tile_x                     => 0,
         tile_y                     => 0,
         ssh_args                   => '',
+        session_max                => 256,
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -80,7 +82,7 @@ sub new {
         "config|c=s@", "login|l=s",    "master",      "slave",
         "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
         "tile_x|x=i",  "tile_y|y=i",
-        "screen=i",    "ssh_args=s",   "debug:+",
+        "screen=i",    "ssh_args=s",   "debug:+",     "session_max=i",
         "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
@@ -148,19 +150,88 @@ sub parse_bounds {
     }
 }
 
+sub parse_range {
+    my ($pat) = @_;
+    if ($pat =~ /,/) {
+        return map { parse_range($_) } split ',', $pat;
+    } elsif ($pat =~ /^([^-]+)-([^-]+)$/) {
+        return ($1..$2);
+    } else {
+        return $pat;
+    }
+}
+
+use Socket;
+sub parse_netmask {
+    my ($host, $mask) = @_;
+    my $pack_host = inet_aton($host) || die "Bad hostname in mask [$host]";    
+
+    my $pack_mask;
+    if ($mask =~ /^\d+$/) {
+        $pack_mask = pack 'N', (2**32 - 2**(32-$mask));
+    } else {
+        $pack_mask = inet_aton($mask) || die "Bad netmask [$mask]";
+    }
+
+    my $start = unpack('N', $pack_host);
+    my $end = unpack('N', INADDR_BROADCAST ^ $pack_mask | $pack_host);
+
+    my @ips;
+    for (my $n=$start; $n<=$end; $n++) {
+        push @ips, inet_ntoa(pack('N', $n));
+    }
+    return @ips;
+}
+
+
+
+sub expand_hostrange {
+    my ($pat) = @_;
+
+    # 192.168.0.0/24
+    # 192.168.0.0/255.255.255.0
+    # 192.168.0.[0-255]
+    # 192.168.0.[0-20,13]
+    # 192.168.[0-2].[255,254]
+    # 192.168.[0-2].0/24
+
+    my ($user, $host, $port) = CsshX::Process->parse_user_host_port($pat);
+    $user = $user ? "$user\@" : '';
+    $port = $port ? ":$port" : '';
+
+    if ($port =~ /^:\[(.+)\]$/) {
+        # Port range
+        return [ map { "$user$host:$_" } parse_range($1) ];
+    } elsif ($host =~ /^(.+)\/(.+)$/) {
+        # Looks like an IPv4 netmask 
+        return [ map { "$user$_$port" } parse_netmask($1,$2) ];
+    } elsif ($host =~ /^(.*)\[(.*?)\](.*)$/) {
+        my $pre = $1; my $post = $3;
+        return [ map { "$user$pre$_$post$port" } parse_range($2) ];
+    }
+}
 
 sub hosts {
     my ($obj) = @_;
 
     my @hosts;
     while (my $arg = shift @ARGV) {
-        if (my $subhosts = $obj->{clusters}->{$arg}) {
-            push @ARGV, @$subhosts;
+        if (my $clusthosts = $obj->{clusters}->{$arg}) {
+            print "Expand cluster: $arg => @$clusthosts\n" if $config->debug;
+            push @ARGV, @$clusthosts;
+        } elsif (my $rangehosts = expand_hostrange($arg)){
+            print "Expand host range: $arg => @$rangehosts\n" if $config->debug;
+            push @ARGV, @$rangehosts;
         } else {
+            print "Host: $arg\n" if $config->debug;
             push @hosts, $arg;
+            if (@hosts > $config->session_max) {
+                die "Too many hosts. Use --session_max if you need more";
+            }
         }
     }
 
+die "end";
     pod2usage(-msg => "$0: Need at least one hostname or clustername\n")
         unless @hosts;
 
@@ -918,6 +989,13 @@ sub title { print "\e]0;csshX - $_[1]\7" };
 
 sub parse_user_host_port {
     my ($obj, $string) = @_;
+
+    # Formats:
+    #   hostname
+    #   hostname:port
+    #   user@hostname
+    #   user@hostname:port
+
     if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
         return ($1, $2, $3);
     } else {
@@ -1622,7 +1700,7 @@ package main;
 
 $config = CsshX::Config->new;
 
-eval "use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }"
+eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }'
     if $config->debug;
 
 if    ($config->help)    { $config->pod(-verbose => 1)                     }
@@ -1658,9 +1736,10 @@ B<csshX> will attempt to create an SSH session to each remote host in separate
 Terminal.app windows. A I<master> window will also be created. All keyboard 
 input in the master will be sent to all the I<slave> windows.
 
-To specify the username for eaxh host, the hostname can be prepended by 
+To specify the username for each host, the hostname can be prepended by 
 I<user@>. Similarly, appending I<:port> will set the port to ssh to.
 
+You can also use hostsname ranges, to specify many hosts.
 
 =head1 OPTIONS
 
@@ -1707,6 +1786,12 @@ Set's a list of arguements to pass to the B<ssh> binary when run. If there are
 more than one, they must be quoted or escaped to prevent B<csshX> from 
 interpreting them.
 
+=item B<--session_max> I<number>
+
+Set the maximum number of SSH Terminal sessions that can be opened during a
+single csshX session. By default csshX will not open more than 256 sesions.
+You must set this to something really high to get around that. (default: 256)
+
 =item B<--sock> I<sockfile>
 
 Sets the unix domain socket filename to be used for interprocess communication.
@@ -1723,6 +1808,41 @@ see any errors).
 
 =back
 
+=head1 HOSTNAME RANGES
+
+If you have a lot of similarly named hosts, or which to open all hosts in
+a subnet, hostname ranges will simplify things. Howerver this also allows
+to open crazy numbers of windows. To save you from yourself, B<session_max>
+will limit the number of hosts opened.
+
+=over 4
+
+=item B<Subnets>
+
+You can specify subnets using two syntaxes:
+
+    192.168.1.0/28
+    192.168.1.0/255.255.255.240
+
+This will also work with a hostname, assuming it resolves to a valid IP
+
+If the IP address is not the network address, only that IP and IPs above 
+that address will be used (e.g. 192.168.0.14/28 will only use 2 ip addresses).
+
+
+=itme B<Ranges>
+
+A range is declared in square brackets. Rules are separated by commas. Ranges
+use a minus-sign. Ranges can be numeric or alphabetic.
+
+Some examples follow:
+
+    hostname[0-10]
+    192.168.0.[5-20]
+    host-[prod,dev][a-f]
+    192.168.[0,2-3].[1-2,3-5]
+
+
 =head1 WINDOW CONTROL
 
 The master window allows additional windows to be opened, control of input
@@ -1736,6 +1856,8 @@ Use B<Esc> to return to input mode.
 =item B<Ctrl-a c>
 
 Open a new terminal and connect to another host. Prompts for hostname. B<Esc> cancels hostname input.
+
+This does not accept cluster names, ranges or subnets. This might be added in the future.
 
 =item B<Ctrl-a Ctrl-a> or B<Ctrl-a a>
 
@@ -1997,6 +2119,13 @@ See --screen in L<OPTIONS>
 
 Arguements to be passed when B<ssh> is run.
 See --ssh_args in L<OPTIONS>
+
+=item B<session_max>
+
+Maxmimum sessions to open.
+See --session_max in L<OPTIONS>
+
+=back
 
 =item B<debug>
 
