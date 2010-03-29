@@ -1,7 +1,7 @@
             ------------------------------------------------
             csshX - Cluster SSH tool for MacOS-X Termial.app
             ------------------------------------------------
-            Copyright 2009 by Gavin Brock  <gbrock@cpan.org>
+            Copyright 2010 by Gavin Brock  <gbrock@cpan.org>
             ------------------------------------------------
 
 
@@ -46,3 +46,10 @@ Full details can be found by running:
 
     perldoc perlartistic
     perldoc perlgpl
+
+
+CREDITS:
+
+Thanks to everyone for the suggestions and bug reports. That's what makes
+coding fun. In additon, I would like to thank the following people for their
+patches: Eric Lubow
