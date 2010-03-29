@@ -25,7 +25,7 @@ exit 255
 use strict;
 use warnings;
 
-our $VERSION  = 0.63;
+our $VERSION  = 0.64;
 (our $REVISION = '$Rev$') =~ s/\D//g;
 
 
@@ -1829,19 +1829,19 @@ This will also work with a hostname, assuming it resolves to a valid IP
 If the IP address is not the network address, only that IP and IPs above 
 that address will be used (e.g. 192.168.0.14/28 will only use 2 ip addresses).
 
-
-=itme B<Ranges>
+=item B<Ranges>
 
 A range is declared in square brackets. Rules are separated by commas. Ranges
 use a minus-sign. Ranges can be numeric or alphabetic.
 
-Some examples follow:
+Some examples:
 
     hostname[0-10]
     192.168.0.[5-20]
     host-[prod,dev][a-f]
     192.168.[0,2-3].[1-2,3-5]
 
+=back
 
 =head1 WINDOW CONTROL
 
@@ -2124,8 +2124,6 @@ See --ssh_args in L<OPTIONS>
 
 Maxmimum sessions to open.
 See --session_max in L<OPTIONS>
-
-=back
 
 =item B<debug>
 
