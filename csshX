@@ -231,7 +231,6 @@ sub hosts {
         }
     }
 
-die "end";
     pod2usage(-msg => "$0: Need at least one hostname or clustername\n")
         unless @hosts;
 
