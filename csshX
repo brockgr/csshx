@@ -1377,7 +1377,7 @@ my $modes = {
             my @slaves = CsshX::Master::Socket::Slave->slaves;
             my @enabled = grep { (! $_->disabled) && $_ } @slaves;
             "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
-            "[c]reate window, [r]etile, [e]nable/disable input, e[n]able all, ".
+            "[c]reate window, [r]etile, sor[t], [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
             "chan[g]e [G]rid, e[x]it\r\n";
@@ -1394,6 +1394,8 @@ my $modes = {
                 } elsif ($buffer =~ s/^r//) {
                     $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^t//) {
+                    return $obj->set_mode_and_parse('sort', $buffer);
                 } elsif ($buffer =~ s/^c//) {
                     return $obj->set_mode_and_parse('addhost', $buffer);
                 } elsif ($buffer =~ s/^e//) {
@@ -1521,6 +1523,30 @@ my $modes = {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->send_input($window->slaveid) unless $window->disabled;
                     }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^\e//) {
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } else {
+                    substr($buffer, 0, 1, '');
+                    print "\007";
+                }
+            }
+            $obj->set_read_buffer('');
+        },
+    },
+    'sort' => {
+        prompt => sub { "Choose sort order: (Esc to exit)\r\n".
+        "[h]ostname, window [i]d" },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            while (length $buffer) {
+                if ($buffer =~ s/^h//) {
+                    CsshX::Master::Socket::Slave->set_sort('host');
+                    $obj->master->arrange_windows;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^i//) {
+                    CsshX::Master::Socket::Slave->set_sort('id');
+                    $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^\e//) {
                     return $obj->set_mode_and_parse('input', $buffer);
@@ -1694,6 +1720,7 @@ use base qw(CsshX::Master::Socket);
 use base qw(CsshX::Window::Slave);
 
 my $slaves_by_slaveid = {};
+my $sort = 'id';
 
 sub new {
     my ($pack, $slaveid) = @_;
@@ -1742,10 +1769,19 @@ sub slaveid        { *{$_[0]}->{slaveid};         }
 sub set_hostname   { *{$_[0]}->{hostname} = $_[1]; }
 sub hostname       { *{$_[0]}->{hostname};         }
 
+sub set_sort       { $sort = $_[1]; }
+sub sort           { $sort;         }         
+
 sub slave_count { scalar keys %$slaves_by_slaveid }
-sub slaves { (
-    map {$slaves_by_slaveid->{$_}} sort {$a<=>$b} keys %$slaves_by_slaveid
-) }
+sub slaves { 
+    if ($sort eq 'host') {
+        return sort { $a->hostname cmp $b->hostname } 
+            map {$slaves_by_slaveid->{$_}} keys %$slaves_by_slaveid;
+    } else {
+        return map {$slaves_by_slaveid->{$_}} 
+            sort {$a<=>$b} keys %$slaves_by_slaveid;
+    }
+}
 
 sub next_slaveid {
     my ($pack) = @_;
@@ -2134,6 +2170,28 @@ Send the unique "slave id". Each slave window is assigned a unique number. This
 might be useful if you have multiple windows on the same host.
 
 =back
+
+=over 4
+
+=item B<Ctrl-a t>
+
+Enter sort menu. This changes the window arrangement order.
+
+=back
+
+=over 8
+
+=item B<h>
+
+Sort by B<hostname>
+
+=item B<i>
+
+Sort by "slave id". This will be the same as the order that hosts were specified on
+the command line. (ping_test'ed hosts will not be in any order)
+
+=back
+
 
 =head1 CONFIGURATION FILES
 
