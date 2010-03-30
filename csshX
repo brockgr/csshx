@@ -1,5 +1,6 @@
 #!/bin/sh -- # --*-Perl-*--
 # Mad perl detection for broken 64-bit 10.6.0
+ulimit -n 1024
 for p in perl5.8.9 perl; do
     if [ -x /usr/bin/$p ]; then
        exec /usr/bin/$p -x -S $0 ${1+"$@"}; fi
@@ -48,7 +49,7 @@ my @config_keys = qw(
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
-    session_max
+    session_max ping_test ping_timeout
 );
 
 sub new {
@@ -70,6 +71,8 @@ sub new {
         tile_y                     => 0,
         ssh_args                   => '',
         session_max                => 256,
+        ping_test                  => '',
+        ping_timeout               => 2,
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -81,7 +84,7 @@ sub new {
     GetOptions($obj, 
         "config|c=s@", "login|l=s",    "master",      "slave",
         "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
-        "tile_x|x=i",  "tile_y|y=i",
+        "tile_x|x=i",  "tile_y|y=i",   "ping_test",   "ping_timeout=i",
         "screen=i",    "ssh_args=s",   "debug:+",     "session_max=i",
         "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
@@ -214,7 +217,16 @@ sub expand_hostrange {
 sub hosts {
     my ($obj) = @_;
 
-    my @hosts;
+    my (@hosts, $ping, $ping_map);
+
+    if ($config->ping_test) {
+        # Load Net::Ping and dependencies only if needed
+        eval 'use Net::Ping; use Carp::Heavy; use Scalar::Util';
+        die "Can't ping_test: $@" if $@;
+        $ping = {};
+        $ping_map = {};
+    }
+
     while (my $arg = shift @ARGV) {
         if (my $clusthosts = $obj->{clusters}->{$arg}) {
             print "Expand cluster: $arg => @$clusthosts\n" if $config->debug;
@@ -223,10 +235,51 @@ sub hosts {
             print "Expand host range: $arg => @$rangehosts\n" if $config->debug;
             push @ARGV, @$rangehosts;
         } else {
+
+
             print "Host: $arg\n" if $config->debug;
-            push @hosts, $arg;
-            if (@hosts > $config->session_max) {
-                die "Too many hosts. Use --session_max if you need more";
+
+            if ($ping) {
+                my ($user, $host, $port) = CsshX::Process->parse_user_host_port($arg);
+                $port ||= getservbyname('ssh', 'tcp') || 22;
+
+                # We cannot identify 'ack's by port, so we have one ping object for each
+                unless ($ping->{$port}) {
+                    $ping->{$port} = Net::Ping->new("syn", $config->ping_timeout);
+                    $ping->{$port}->service_check(1);
+                    $ping->{$port}->{port_num} = $port;
+                    $ping_map->{$port} = {};
+                }
+
+                # Multiple user@host's may be used so map users to host,port
+                unless ($ping_map->{$port}->{$host}) {
+                    $ping_map->{$port}->{$host} = [];
+                    $ping->{$port}->ping("$host") || die "Can't ping: $!";
+                }
+
+                push @{$ping_map->{$port}->{$host}}, $arg;
+
+            } else {
+
+                push @hosts, $arg;
+                if (@hosts > $config->session_max) {
+                    die "Too many hosts. Use --session_max if you need more, ".
+                        "or --ping_test to only connect to ones that are up";
+                }
+            }
+        }
+    }
+
+    if ($ping) {
+        foreach my $port (keys %{$ping_map}) {
+            print "Ping Port: $port\n" if $config->debug;
+            while (my $host = $ping->{$port}->ack) {
+                my @args = @{$ping_map->{$port}->{$host}};
+                print "Ping Ack: $host (@args)\n" if $config->debug;
+                push @hosts, @args;
+                if (@hosts > $config->session_max) {
+                    die "Too many hosts. Use --session_max if you need more";
+                }
             }
         }
     }
@@ -1710,7 +1763,7 @@ elsif ($config->slave)   { CsshX::Slave->new()                             }
 else                     { CsshX::Launcher->new()                          }
 
 #
-# vim: expandtab sw=4 ts=4 sts=4:
+# vim: expandtab sw=4 ts=4 sts=4 syntax=perl:
 #==============================================================================#
 
 __END__
@@ -1791,6 +1844,26 @@ Set the maximum number of SSH Terminal sessions that can be opened during a
 single csshX session. By default csshX will not open more than 256 sesions.
 You must set this to something really high to get around that. (default: 256)
 
+Note that you will probably run out of Pseudo-TTY's before reaching 256
+terminal windows.
+
+=item B<--ping_test> I<number>
+
+To avoid opeining connections to machines that are down, or not running ssh, this
+option will make csshX ping each host/port that is specified. This uses the 
+Net::Ping module to perform a simple syn/ack check.
+
+Use of this option is highly recomended when subnet ranges are used.
+
+=item B<--ping_timeout> I<number>
+
+This sets the timeout used when the "ping_test" feature is enabled. 
+
+Due to the implementation of Net::Ping syn/ack checks, this timeout applies
+once per destination port used.
+
+The value is in seconds. (default: 2)
+
 =item B<--sock> I<sockfile>
 
 Sets the unix domain socket filename to be used for interprocess communication.
@@ -1813,6 +1886,9 @@ If you have a lot of similarly named hosts, or which to open all hosts in
 a subnet, hostname ranges will simplify things. Howerver this also allows
 to open crazy numbers of windows. To save you from yourself, B<session_max>
 will limit the number of hosts opened.
+
+It is also recomended to enable B<ping_test> if only a few machines on a 
+subnet are actually available.
 
 =over 4
 
@@ -2123,6 +2199,16 @@ See --ssh_args in L<OPTIONS>
 
 Maxmimum sessions to open.
 See --session_max in L<OPTIONS>
+
+=item B<ping_test>
+
+Ping each host before attempting to connect
+See --ping_test in L<OPTIONS>
+
+=item B<ping_timeout>
+
+The timeout, in seconds, for the ping test.
+See --ping_timeout in L<OPTIONS>
 
 =item B<debug>
 
