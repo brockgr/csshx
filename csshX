@@ -1,5 +1,4 @@
 #!/bin/sh -- # --*-Perl-*--
-/usr/bin/ulimit -n 1024
 # Mad perl detection for broken 64-bit 10.6.0
 for p in perl5.8.9 perl; do
     if [ -x /usr/bin/$p ]; then
@@ -254,7 +253,16 @@ sub hosts {
                 # Multiple user@host's may be used so map users to host,port
                 unless ($ping_map->{$port}->{$host}) {
                     $ping_map->{$port}->{$host} = [];
-                    $ping->{$port}->ping("$host") || next;
+                    eval {
+                        $ping->{$port}->ping("$host") || next;
+                    }; if ($@) {
+                        if ($@ =~ /Too many open files/) {
+                            # Handle a batch of pings to free file handles
+                            push @hosts, process_pings($ping,$ping_map);
+                        } else {
+                            die "ping_test failed: $@";
+                        }
+                    }
                 }
 
                 push @{$ping_map->{$port}->{$host}}, $arg;
@@ -271,22 +279,32 @@ sub hosts {
     }
 
     if ($ping) {
-        foreach my $port (keys %{$ping_map}) {
-            print "Ping Port: $port\n" if $config->debug;
-            while (my $host = $ping->{$port}->ack) {
-                my @args = @{$ping_map->{$port}->{$host}};
-                print "Ping Ack: $host (@args)\n" if $config->debug;
-                push @hosts, @args;
-                if (@hosts > $config->session_max) {
-                    die "Too many hosts. Use --session_max if you need more";
-                }
-            }
-        }
+        push @hosts, process_pings($ping,$ping_map);
     }
 
     pod2usage(-msg => "$0: Need at least one hostname or clustername\n")
         unless @hosts;
 
+    return @hosts;
+}
+
+sub process_pings {
+    my ($ping, $ping_map) = @_;
+
+    my @hosts;
+    foreach my $port (keys %{$ping_map}) {
+        print "Ping Port: $port\n" if $config->debug;
+        while (my $host = $ping->{$port}->ack) {
+            my @args = @{$ping_map->{$port}->{$host}};
+            print "Ping Ack: $host (@args)\n" if $config->debug;
+            push @hosts, @args;
+            if (@hosts > $config->session_max) {
+                die "Too many hosts. Use --session_max if you need more";
+            }
+        }
+    }
+    %$ping_map = ();
+    %$ping = ();
     return @hosts;
 }
 
@@ -1892,7 +1910,9 @@ Use of this option is highly recomended when subnet ranges are used.
 This sets the timeout used when the "ping_test" feature is enabled. 
 
 Due to the implementation of Net::Ping syn/ack checks, this timeout applies
-once per destination port used.
+once per destination port used. Also, if the number of hosts to ping is greater
+than the number of filehandles available pings will be batched, and the timeout
+will apply once per batch. You can set 'ulimit -n' to improve this performance.
 
 The value is in seconds. (default: 2)
 
