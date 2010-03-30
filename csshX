@@ -1,6 +1,6 @@
 #!/bin/sh -- # --*-Perl-*--
+/usr/bin/ulimit -n 1024
 # Mad perl detection for broken 64-bit 10.6.0
-ulimit -n 1024
 for p in perl5.8.9 perl; do
     if [ -x /usr/bin/$p ]; then
        exec /usr/bin/$p -x -S $0 ${1+"$@"}; fi
@@ -254,7 +254,7 @@ sub hosts {
                 # Multiple user@host's may be used so map users to host,port
                 unless ($ping_map->{$port}->{$host}) {
                     $ping_map->{$port}->{$host} = [];
-                    $ping->{$port}->ping("$host") || die "Can't ping: $!";
+                    $ping->{$port}->ping("$host") || next;
                 }
 
                 push @{$ping_map->{$port}->{$host}}, $arg;
@@ -752,19 +752,35 @@ sub set_selected  {
 }
 
 sub format_selected {
-    my $bg_color =
-        $config->color_selected_background ||
-        ($_[0]->disabled && $config->color_disabled_background) ||
-        $_[0]->stored_color->{bg} ||
-        '';
-    my $fg_color =
-        $config->color_selected_foreground ||
-        ($_[0]->disabled && $config->color_disabled_foreground) ||
-        $_[0]->stored_color->{fg} ||
-        '';
-    $_[0]->store_color($bg_color, $fg_color) unless $_[0]->disabled;
-    $_[0]->set_color($bg_color, $fg_color);
+    if (my $bg_color = $config->color_selected_background) {
+        if (! $config->color_disabled_background) {
+            if (!$_[0]->disabled) {
+                $_[0]->store_color(1,0);
+                $_[0]->set_color($bg_color, undef);
+            } else {
+                $_[0]->set_color($bg_color, undef);
+            }
+        } else {
+            $_[0]->store_color(1,0);
+            $_[0]->set_color($bg_color, undef);
+        }
+    }
+
+    if (my $fg_color = $config->color_selected_foreground) {
+        if ($_[0]->disabled) {
+            if (! $config->color_disabled_foreground) {
+                $_[0]->store_color(0,1);
+                $_[0]->set_color(undef, $fg_color);
+            } else {
+                $_[0]->set_color(undef, $fg_color);
+            }
+        } else {
+            $_[0]->store_color(0,1);
+            $_[0]->set_color(undef, $fg_color);
+        }
+    }
 }
+
 
 sub format_unselected {
     my $bg_color =
@@ -779,19 +795,30 @@ sub format_unselected {
 }
 
 sub format_disabled {
-    my $bg_color =
-        ($_[0]->selected && $config->color_selected_background) ||
-        $config->color_disabled_background ||
-        $_[0]->stored_color->{bg} ||
-        '';
-    my $fg_color =
-        ($_[0]->selected && $config->color_selected_foreground) ||
-        $config->color_disabled_foreground ||
-        $_[0]->stored_color->{fg} ||
-        '';
-    $_[0]->store_color($bg_color, $fg_color) unless $_[0]->selected;
-    $_[0]->set_color($bg_color, $fg_color);
-};
+    if ($_[0]->selected) {
+        if (! $config->color_selected_background) {
+            if (my $bg_color = $config->color_disabled_background) {
+                $_[0]->store_color(1,0);
+                $_[0]->set_color($bg_color, undef);
+            }
+        }
+        if (! $config->color_selected_foreground) {
+            if (my $fg_color = $config->color_disabled_foreground) {
+                $_[0]->store_color(0,1);
+                $_[0]->set_color(undef, $fg_color);
+            }
+        }
+    } else {
+        if (my $bg_color = $config->color_disabled_background) {
+            $_[0]->store_color(1,0);
+            $_[0]->set_color($bg_color, undef);
+        }
+        if (my $fg_color = $config->color_disabled_foreground) {
+            $_[0]->store_color(0,1);
+            $_[0]->set_color(undef, $fg_color);
+        }
+    } 
+}
 
 sub format_enabled {
     my $bg_color =
@@ -1310,7 +1337,7 @@ my $kk = "\e[0m";      # Reset
 
 my $modes = {
     'input' => {
-        prompt => "Input to terminal: (Ctrl-a to enter control mode)\r\n",
+        prompt =>  sub { "Input to terminal: (Ctrl-a to enter control mode)\r\n" },
         onchange => sub { system '/bin/stty', 'raw' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1328,10 +1355,15 @@ my $modes = {
 
     },
     'action' => {
-        prompt => "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
-        "[c]reate window, [r]etile, [e]nable/disable input, e[n]able all, ".
-        "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
-        "chan[g]e [G]rid, e[x]it\r\n",
+        prompt => sub { 
+            my @slaves = CsshX::Master::Socket::Slave->slaves;
+            my @enabled = grep { (! $_->disabled) && $_ } @slaves;
+            "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
+            "[c]reate window, [r]etile, [e]nable/disable input, e[n]able all, ".
+            ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
+            "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
+            "chan[g]e [G]rid, e[x]it\r\n";
+        },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
         
@@ -1408,9 +1440,9 @@ my $modes = {
         }
     },
     'bounds' => {
-        prompt => "Move and resize master to define bounds: (Enter to accept, ".
+        prompt => sub { "Move and resize master to define bounds: (Enter to accept, ".
         "Esc to cancel)\r\n".
-        "[r]eset to default, [f]ull screen, [p]rint current bounds",
+        "[r]eset to default, [f]ull screen, [p]rint current bounds" },
         onchange => sub {
             my ($obj) = @_;
             $obj->master->format_resize;
@@ -1450,8 +1482,8 @@ my $modes = {
         },
     },
     'sendstring' => {
-        prompt => "Send string to all active windows: (Esc to exit)\r\n".
-        "[h]ostname, [c]onnection string, window [i]d",
+        prompt => sub { "Send string to all active windows: (Esc to exit)\r\n".
+        "[h]ostname, [c]onnection string, window [i]d" },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             while (length $buffer) {
@@ -1483,8 +1515,8 @@ my $modes = {
         },
     },
     'enable' => {
-        prompt => "Select window with cursors: (Esc to exit)\r\n".
-        "[e]nable input, [d]isable input, disable [o]thers, [t]oggle intput",
+        prompt => sub { "Select window with cursors: (Esc to exit)\r\n".
+        "[e]nable input, [d]isable input, disable [o]thers, diable [O]thers and zoom, [t]oggle intput" },
         onchange => sub { CsshX::Window::Slave->selection_on; },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1542,7 +1574,7 @@ my $modes = {
         },
     },
     'addhost' => {
-        prompt => 'Add Host: ',
+        prompt => sub { 'Add Host: ' },
         onchange => sub { system '/bin/stty', 'sane' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1585,7 +1617,7 @@ sub set_mode {
     if (!$obj->mode || $mode ne $obj->mode) {
         *$obj->{csshx_mode} = $mode;
         $modes->{$mode}->{onchange}->($obj) if $modes->{$mode}->{onchange};
-        $obj->master->set_prompt($modes->{$mode}->{prompt});
+        $obj->master->set_prompt($modes->{$mode}->{prompt}->());
     }
 }
 
@@ -1763,7 +1795,7 @@ elsif ($config->slave)   { CsshX::Slave->new()                             }
 else                     { CsshX::Launcher->new()                          }
 
 #
-# vim: expandtab sw=4 ts=4 sts=4 syntax=perl:
+# vim: expandtab sw=4 ts=4 sts=4:
 #==============================================================================#
 
 __END__
@@ -1980,6 +2012,11 @@ Renable all windows for input.
 
 Enter window selection mode. In window slection mode the following keys are
 available:
+
+=item B<Ctrl-a space>  
+
+Disable current terminal and enable next terminal. (Works when only one 
+terminal is enabled)
 
 =back
 
