@@ -2064,15 +2064,15 @@ Toggle the enabled status of all windows.
 
 Renable all windows for input.
 
+=item B<Ctrl-a space>  
+
+Disable current terminal and enable next terminal. (Works when only one 
+terminal is enabled - see below)
+
 =item B<Ctrl-a e>  
 
 Enter window selection mode. In window slection mode the following keys are
 available:
-
-=item B<Ctrl-a space>  
-
-Disable current terminal and enable next terminal. (Works when only one 
-terminal is enabled)
 
 =back
 
