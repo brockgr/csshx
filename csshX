@@ -81,10 +81,10 @@ sub new {
     $obj->load_csshrc($_) foreach ("/etc/csshrc", "$ENV{HOME}/.csshrc");
 
     GetOptions($obj, 
-        "config|c=s@", "login|l=s",    "master",      "slave",
-        "sock=s",      "slavehost=s",  "launchpid=s", "slaveid=s",
-        "tile_x|x=i",  "tile_y|y=i",   "ping_test",   "ping_timeout=i",
-        "screen=i",    "ssh_args=s",   "debug:+",     "session_max=i",
+        "config|c=s@", "login|l=s",    "master",         "slave",
+        "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
+        "tile_x|x=i",  "tile_y|y=i",   "ping_test|ping", "ping_timeout=i",
+        "screen=i",    "ssh_args=s",   "debug:+",        "session_max=i",
         "help|h",      "man|m",        "version|v",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
@@ -254,7 +254,7 @@ sub hosts {
                 unless ($ping_map->{$port}->{$host}) {
                     $ping_map->{$port}->{$host} = [];
                     eval {
-                        $ping->{$port}->ping("$host") || next;
+                        $ping->{$port}->ping("$host");
                     }; if ($@) {
                         if ($@ =~ /Too many open files/) {
                             # Handle a batch of pings to free file handles
@@ -1933,7 +1933,7 @@ You must set this to something really high to get around that. (default: 256)
 Note that you will probably run out of Pseudo-TTY's before reaching 256
 terminal windows.
 
-=item B<--ping_test> I<number>
+=item B<--ping_test>, B<--ping> I<number>
 
 To avoid opeining connections to machines that are down, or not running ssh, this
 option will make csshX ping each host/port that is specified. This uses the 
