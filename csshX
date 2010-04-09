@@ -1377,7 +1377,7 @@ my $modes = {
             my @slaves = CsshX::Master::Socket::Slave->slaves;
             my @enabled = grep { (! $_->disabled) && $_ } @slaves;
             "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
-            "[c]reate window, [r]etile, sor[t], [e]nable/disable input, e[n]able all, ".
+            "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
             "chan[g]e [G]rid, e[x]it\r\n";
@@ -1394,7 +1394,7 @@ my $modes = {
                 } elsif ($buffer =~ s/^r//) {
                     $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
-                } elsif ($buffer =~ s/^t//) {
+                } elsif ($buffer =~ s/^o//) {
                     return $obj->set_mode_and_parse('sort', $buffer);
                 } elsif ($buffer =~ s/^c//) {
                     return $obj->set_mode_and_parse('addhost', $buffer);
