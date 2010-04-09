@@ -2173,7 +2173,7 @@ might be useful if you have multiple windows on the same host.
 
 =over 4
 
-=item B<Ctrl-a t>
+=item B<Ctrl-a o>
 
 Enter sort menu. This changes the window arrangement order.
 
