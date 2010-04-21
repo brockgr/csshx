@@ -52,4 +52,4 @@ CREDITS:
 
 Thanks to everyone for the suggestions and bug reports. That's what makes
 coding fun. In additon, I would like to thank the following people for their
-patches: Eric Lubow
+patches: Eric Lubow, mtbeedee
