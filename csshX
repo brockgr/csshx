@@ -48,7 +48,7 @@ my @config_keys = qw(
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
-    session_max ping_test ping_timeout
+    session_max ping_test ping_timeout ssh
 );
 
 sub new {
@@ -72,6 +72,7 @@ sub new {
         session_max                => 256,
         ping_test                  => '',
         ping_timeout               => 2,
+        ssh                        => 'ssh',
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -85,7 +86,7 @@ sub new {
         "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
         "tile_x|x=i",  "tile_y|y=i",   "ping_test|ping", "ping_timeout=i",
         "screen=i",    "ssh_args=s",   "debug:+",        "session_max=i",
-        "help|h",      "man|m",        "version|v",
+        "help|h",      "man|m",        "version|v",      "ssh=s"
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     $obj->load_csshrc($_) foreach @{$obj->{config}};
@@ -1146,6 +1147,7 @@ sub new {
         $slave_id++;
         my $slave_windowid = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
+            '--ssh', $config->ssh,
             '--ssh_args', $config->ssh_args, '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
@@ -1204,7 +1206,7 @@ sub new {
         $pack->title($config->slavehost);
         $user ||= $config->login;
 
-        my @cmd = ('ssh', shellwords($config->ssh_args),
+        my @cmd = ($config->ssh, shellwords($config->ssh_args),
             $user ? ('-l', $user) : (),
             $port ? ('-p', $port) : (),
             $host
@@ -1635,6 +1637,7 @@ my $modes = {
                     $slave->open_window(
                         $script, '--slave', '--sock', $sock, 
                         '--slavehost', $hostname, '--slaveid', $slaveid,
+                        '--ssh', $config->ssh,
                         '--ssh_args', $config->ssh_args, '--debug', $config->debug,
                         $login  ? ( '--login',    $login  ) :(),
                         (map { ('--config', $_) } @config),
@@ -1918,6 +1921,11 @@ Default: I<0>  (Main window)
 (csshX only) The number of rows to use when tiling windows.
 B<tile_x> will be use if both are specified.
 
+=item B<--ssh> I<ssh command>
+
+Change the command that is run. May useful if you use an alternative ssh binary
+or some wrapper script to connect to hosts.
+
 =item B<--ssh_args> I<ssh arguements>
 
 Set's a list of arguements to pass to the B<ssh> binary when run. If there are
@@ -2166,7 +2174,7 @@ were specified.
 
 =item B<i>
 
-Send the unique "slave id". Each slave window is assigned a unique number. This
+Send the unique B<slave id>. Each slave window is assigned a unique number. This
 might be useful if you have multiple windows on the same host.
 
 =back
@@ -2187,7 +2195,7 @@ Sort by B<hostname>
 
 =item B<i>
 
-Sort by "slave id". This will be the same as the order that hosts were specified on
+Sort by B<slave id>. This will be the same as the order that hosts were specified on
 the command line. (ping_test'ed hosts will not be in any order)
 
 =back
@@ -2305,6 +2313,11 @@ terminal windows. Default is the actual screen size. Format is:
 (csshX only) The screen number which to draw the terminal windows.
 See --screen in L<OPTIONS>
 
+=item B<ssh>
+
+Command to be used instead of B<ssh>.
+See --ssh in L<OPTIONS>
+
 =item B<ssh_args>
 
 Arguements to be passed when B<ssh> is run.
@@ -2371,7 +2384,7 @@ under the same terms as Perl itself.
 
 L<http://clusterssh.sourceforge.net/>,
 L<ssh>,
-L<MacPerl>
+L<MacPerl>,
 L<perl>
 
 =cut
