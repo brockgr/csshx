@@ -1,17 +1,4 @@
-#!/bin/sh -- # --*-Perl-*--
-# Mad perl detection for broken 64-bit 10.6.0
-for p in perl5.8.9 perl; do
-    if [ -x /usr/bin/$p ]; then
-       exec /usr/bin/$p -x -S $0 ${1+"$@"}; fi
-done
-echo No valid perl found - please submit a bug at http://code.google.com/p/csshx/issues
-echo Please attach the data below:
-echo --------------------
-sw_vers; ls -1 /usr/bin/perl*
-echo --------------------
-exit 255
 #!/usr/bin/perl
-#line 15
 
 #==============================================================================#
 # csshX -- Cluster SSH tool for MacOS-X Termial.app                            #
@@ -25,9 +12,8 @@ exit 255
 use strict;
 use warnings;
 
-our $VERSION  = 0.65;
+use version; our $VERSION = qv("0.70");
 (our $REVISION = '$Rev$') =~ s/\D//g;
-
 
 my $config; # Global configuration object..
 
@@ -37,6 +23,7 @@ package CsshX::Config;
 
 use Pod::Usage;
 use Getopt::Long;
+use Socket;
 use POSIX qw(uname);
 
 my @config_keys = qw(
@@ -44,7 +31,7 @@ my @config_keys = qw(
     color_disabled_foreground color_disabled_background
     color_master_background color_master_foreground
     color_setbounds_background color_setbounds_foreground
-    tile_x tile_y ssh_args
+    tile_x tile_y ssh_args no_growl
     config help launchpid login man master
     master_height screen_bounds screen debug
     slave slavehost slaveid sock version osver
@@ -73,6 +60,7 @@ sub new {
         ping_test                  => '',
         ping_timeout               => 2,
         ssh                        => 'ssh',
+        no_growl                   => 0,
         clusters => {}
     }, ref($pack) || $pack;
 
@@ -86,7 +74,7 @@ sub new {
         "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
         "tile_x|x=i",  "tile_y|y=i",   "ping_test|ping", "ping_timeout=i",
         "screen=i",    "ssh_args=s",   "debug:+",        "session_max=i",
-        "help|h",      "man|m",        "version|v",      "ssh=s"
+        "help|h",      "man|m",        "version|v",      "ssh=s",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     $obj->load_csshrc($_) foreach @{$obj->{config}};
@@ -164,7 +152,6 @@ sub parse_range {
     }
 }
 
-use Socket;
 sub parse_netmask {
     my ($host, $mask) = @_;
     my $pack_host = inet_aton($host) || die "Bad hostname in mask [$host]";    
@@ -185,8 +172,6 @@ sub parse_netmask {
     }
     return @ips;
 }
-
-
 
 sub expand_hostrange {
     my ($pat) = @_;
@@ -235,7 +220,6 @@ sub hosts {
             print "Expand host range: $arg => @$rangehosts\n" if $config->debug;
             push @ARGV, @$rangehosts;
         } else {
-
 
             print "Host: $arg\n" if $config->debug;
 
@@ -386,7 +370,7 @@ sub terminate {
     my ($obj) = @_;
     $obj->writers->remove($obj);
     $obj->readers->remove($obj);
-    $obj->SUPER::terminate;
+    $obj->SUPER::terminate();
 }
 
 
@@ -394,48 +378,84 @@ sub terminate {
 
 package CsshX::Window;
 
-use base    qw(IO::Handle);
-use MacPerl qw(DoAppleScript);
 use Foundation;
+use base qw(IO::Handle);
 
-# TODO - There is a race condition if you change terminal windows between the 
-#        "do script" and the "return front window". As far as I can see, 10.4/5
-#        do not give you any feedback from a "do script" and there is no way
-#        to "do script in window foo" where foo is a newly made window. :-(
+# Define ScriptingBridge/AppKit objects that we will use
+@NSWorkspace::ISA = @SBApplication::ISA = @NSScreen::ISA = @NSColor::ISA =
+    qw(PerlObjCBridge);
+
+
+NSBundle->bundleWithPath_(
+    '/System/Library/Frameworks/ScriptingBridge.framework' # Loads AppKit too
+)->load;
+
+my $terminal = SBApplication->applicationWithBundleIdentifier_(
+    "com.apple.terminal"
+);
+
 
 my ($cur_bounds, $max_bounds);
 
-sub script { DoAppleScript($_[1]) };
+sub make_NSColor {
+    my ($obj, $str) = @_;
 
-sub perlValue { $_[0] && ${$_[0]} ? $_[0]->description()->UTF8String() : undef }
+    return $str if ref $str; # it's already an NSColor Obj
+
+    # Can create an nscolor in two formats
+    #    { 65535, 65535, 65535 }
+    #    FFFFFF
+
+    my ($r,$g,$b) = @_;
+    if ($str =~ /^\{(\d+),(\d+),(\d+)\}$/) {
+        ($r,$g,$b) = map { $_ / 65535 } ($1,$2,$3);
+    } elsif ($str =~ /^(\w\w)(\w\w)(\w\w)$/) {
+        ($r,$g,$b) = map { hex($_) / 255 } ($1,$2,$3);
+    } else {
+        die "Bad color [$str]";
+    }
+    return NSColor->colorWithCalibratedRed_green_blue_alpha_($r,$g,$b,0);
+}
 
 sub get_shell {
-    my $term;
+    my $shell;
 
     # Check Terminal.app settings
     if (my $defs = NSUserDefaults->alloc->init) {
         $defs->addSuiteNamed_("com.apple.terminal");
 
-        if ($config->osver =~ /^10.4/) {
-            my $termStr = $defs->stringForKey_("Shell");
-            $term = perlValue($termStr);
-        } else {
-            my $set = $defs->stringForKey_("Default Window Settings");
-            my $dict = $defs->dictionaryForKey_("Window Settings");
-            if ($set && $$set && $dict && $$dict) {
-                my $subdict = $dict->objectForKey_($set);
-                if ($subdict && $$subdict) {
-                    my $termStr = $subdict->objectForKey_("CommandString");
-                    $term = perlValue($termStr);
-                }
+        my $set = $defs->stringForKey_("Default Window Settings");
+        my $dict = $defs->dictionaryForKey_("Window Settings");
+        if ($set && $$set && $dict && $$dict) {
+            my $subdict = $dict->objectForKey_($set);
+            if ($subdict && $$subdict) {
+                my $shellStr = $subdict->objectForKey_("CommandString");
+                $shell = $shellStr->UTF8String if $shellStr && $$shellStr;
             }
         }
     }
 
     # else try the 'passwd' file
-    $term ||= (getpwuid "$>")[8];
+    $shell ||= (getpwuid "$>")[8];
+    return $shell;
+}
 
-    return $term;
+sub find_ids_by_tty {
+    my ($obj, $tty) = @_;
+    my $windows = $terminal->windows;
+    for (my $n=0; $n<$windows->count; $n++) {
+        my $window = $windows->objectAtIndex_($n);
+        my $tabs = $window->tabs;
+        for (my $m=0; $m<$tabs->count; $m++) {
+            my $tab = $tabs->objectAtIndex_($m);
+            if ($tab->tty && ($tab->tty->UTF8String eq $tty)) {
+                $obj->set_windowid("".$window->id);
+                $obj->set_tabid($m);
+                return 1;
+            }
+        }
+    }
+    return();
 }
 
 sub open_window {
@@ -451,65 +471,46 @@ sub open_window {
     $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
     # TODO - (t)csh, ksh, zsh 
 
-    my $window_id = $pack->script('
-        tell application "Terminal.app"
-            do script "'.$cmd.'"
-            set win to front window
-            return win
-        end tell
-    ') || return;
+    my $tabobj = $terminal->doScript_in_($cmd, undef) || die;
+    my $tty = $tabobj->tty->UTF8String || die;
+    
+    $pack->find_ids_by_tty($tty) if (ref $pack);
 
-    $pack->set_windowid($window_id) if ref $pack;
-    return $window_id;
+    return $tty;
 }
 
 sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
 sub windowid      { *{$_[0]}->{windowid};         }
 
+sub set_tabid  { *{$_[0]}->{tabid} = $_[1]; }
+sub tabid      { *{$_[0]}->{tabid};         }
+
+sub winobj { $terminal->windows->objectWithID_($_[0]->windowid) }
+sub tabobj { $_[0]->winobj->tabs->objectAtIndex_($_[0]->tabid) }
+
 sub set_color {
     my ($obj, $bg_color, $fg_color) = @_;
 
     if ($bg_color) {
-        $obj->script(
-            'tell application "Terminal" to set background color of '.
-            $obj->windowid.' to '.$bg_color
-        );
+        $obj->tabobj->setBackgroundColor_($obj->make_NSColor($bg_color));
     }
     if ($fg_color) {
-        $obj->script(
-            'tell application "Terminal" to set normal text color of '.
-            $obj->windowid.' to '.$fg_color
-        );
-        $obj->script(
-            'tell application "Terminal" to set bold text color of '.
-            $obj->windowid.' to '.$fg_color
-        );
-
-        # Need to redo this on buggy 10.4 only
-        $obj->script('
-            tell application "Terminal" to set background color of '.
-            $obj->windowid.' to background color of '.$obj->windowid
-        ) if ($config->osver =~ /^10.4/);
+        $obj->tabobj->setNormalTextColor_($obj->make_NSColor($fg_color));
+        #$obj->tabobj->setBoldTextColor_($obj->make_NSColor($fg_color));
     }
 
 }
-
 
 sub store_color {
     my ($obj, $bg, $fg) = @_;
     *$obj->{'stored_color'} ||= {};
     if ($bg) {
-        *$obj->{'stored_color'}->{bg} = $obj->script(
-            'tell application "Terminal" to return background'.
-            ' color of '.$obj->windowid
-        );
+        *$obj->{'stored_color'}->{bg} = $obj->tabobj->backgroundColor();
     }
 
     if ($fg) {
-        *$obj->{'stored_color'}->{fg} = $obj->script(
-            'tell application "Terminal" to return normal text'.
-            ' color of '.$obj->windowid
-        );
+        *$obj->{'stored_color'}->{fg} = $obj->tabobj->normalTextColor();
+        #*$obj->{'stored_color'}->{fg} = $obj->tabobj->boldTextColor();
     }
 }
 
@@ -541,32 +542,16 @@ sub screen_bounds {
     return $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
 }
 
-my $appkit;
 sub physical_screen_bounds { 
     my ($scr) = @_;
 
-    unless ($appkit) {
-        $appkit = NSBundle->alloc->init->initWithPath_(
-            '/System/Library/Frameworks/AppKit.framework'
-        );
-        $appkit->load && $appkit->isLoaded || die "AppKit failed to load";
-        @NSScreen::ISA = 'PerlObjCBridge';
-    }
-
-    my $displays =  NSScreen->screens()->count -1;
+    my $displays =  NSScreen->screens()->count - 1;
     die "No such screen [$scr], screen must be $displays or less"
         if ($scr > $displays);
 
-    my $frame =  perlValue(NSValue->valueWithRect_(
-        NSScreen->screens->objectAtIndex_($scr)->visibleFrame));
+    my $frame =  NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
 
-    if ($frame =~ /NSRect: \{\{(-?\d+), (-?\d+)}, {(\d+), (\d+)\}\}/) {
-        return($1,$2,$3,$4); # 10.5 style
-    } elsif ($frame =~ /<([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) ([\da-h]{8}) >/i) {
-        return(map { unpack "f", pack "H*", $_ } ($1,$2,$3,$4));
-    } else {
-        die "Can't decode bounds [$frame]";
-    }
+    return ObjCStruct::NSRect->unpack($frame);
 }
 
 sub reset_bounds {
@@ -585,56 +570,47 @@ sub max_bounds {
 
 sub size {
     my ($obj) = @_;
-    if ( my ($w, $h) = ($obj->script(
-        'tell application "Terminal" to return size of '.$obj->windowid
-    ) =~ m/\{\s*(\d+),\s*(\d+)\}/)) {
-        return { w => $w, h => $h };
-    }
+    my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
+    return { w => $w, h => $h };
 }
 
 sub bounds {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
-    my $origin = $obj->script(
-        'tell application "Terminal" to get origin of '.$windowid
-    );
-    my ($x,$y) = ($origin =~ /\{(\d+),\s*(\d+)\}/);
-
-    my $size = $obj->script(
-        'tell application "Terminal" to get size of '.$windowid
-    );
-    my ($w,$h) = ($size =~ /\{(\d+),\s*(\d+)\}/);
-
+    my ($x, $y) = ObjCStruct::NSPoint->unpack($obj->winobj->origin);
+    my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
     return { x => $x, y => $y, w => $w, h => $h };
+}
+
+sub move {
+    my ($obj, $dx, $dy) = @_;
+    my ($x, $y) = ObjCStruct::NSPoint->unpack($obj->winobj->origin);
+    $x += 5 * $dx;
+    $y -= 5 * $dy;
+    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+}
+
+sub grow {
+    my ($obj, $dw, $dh) = @_;
+    my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
+    $w += 5 * $dw;
+    $h -= 5 * $dh;
+    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
 }
 
 sub close_window {
     my ($obj) = @_;
-    $obj->script('
-        ignoring application responses
-            tell application "Terminal" to close '.$obj->windowid.'
-        end ignoring
-    ');
+    # Note that Saving is a OSType (bid endian)
+    $obj->winobj->closeSaving_savingIn_(unpack('N', 'no  '),undef);
 }
     
 sub hide {
     my ($obj) = @_;
-    $obj->script('
-        ignoring application responses
-            tell application "Terminal" to set visible of '.
-            $obj->windowid.' to false
-        end ignoring
-    ');
+    $obj->winobj->setVisible_(0);
 }
 
 sub minimise {
     my ($obj) = @_;
-    $obj->script('
-        ignoring application responses
-            tell application "Terminal" to set miniaturized of '.
-            $obj->windowid.' to true
-        end ignoring
-    ');
+    $obj->winobj->setMiniaturized_(1);
 }
 
 
@@ -647,10 +623,9 @@ use base qw(CsshX::Window);
 
 sub format_master {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
 
-    my $fg = $config->color_master_foreground;
-    my $bg = $config->color_master_background;
+    my $fg = $obj->make_NSColor($config->color_master_foreground);
+    my $bg = $obj->make_NSColor($config->color_master_background);
     my $mh = $config->master_height;
     my $bounds = $obj->screen_bounds;
 
@@ -658,43 +633,24 @@ sub format_master {
     my $w = $bounds->{w};
     my $y = $bounds->{y};
 
-    $obj->script('
-       tell application "Terminal.app"
-            try
-                set miniaturized of '.$windowid.' to false
-                set size of '.$windowid.' to { '.$w.', '.$mh.' }
-                set origin of '.$windowid.' to { '.$x.', '.$y.' }
-                set background color of '.$windowid.' to '.$bg.'
-                set normal text color of '.$windowid.' to '.$fg.'
-                set frontmost of '.$windowid.' to true
-            end try
-        end tell
-    ');
+    $obj->winobj->setMiniaturized_(0);
+    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$mh));
+    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+    $obj->tabobj->setBackgroundColor_($bg);
+    $obj->tabobj->setNormalTextColor_($fg);
+    $obj->winobj->setFrontmost_(1);
 
-    # Now check the height of the terminal window incase it's larger than expected
-    # If so, move it of the bottom of the screen if possible
+    # Now check the height of the terminal window in case it's larger than 
+    # expected, if so, move it off the bottom of the screen if possible
 
-    my $real_mh = $obj->script('
-        tell application "Terminal.app"
-            set {w, h} to size of '.$windowid.'
-            return h
-        end tell
-    ');
-
-    if ($real_mh > $mh) {
-        $obj->script('
-            tell application "Terminal.app"
-                try
-                    set origin of '.$windowid.' to { '.$x.', '.($y-($real_mh-$mh)).' }
-                end try
-            end tell
-        ');
-    }
+    my ($real_mw, $real_mh) = ObjCStruct::NSSize->unpack($obj->winobj->size());
+    $obj->winobj->setOrigin_(
+            ObjCStruct::NSPoint->new($x, ($y-($real_mh-$mh)))
+    ) if ($real_mh > $mh);
 }
 
 sub format_resize {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
 
     my $bg_color = $config->color_setbounds_background;
     my $fg_color = $config->color_setbounds_foreground;
@@ -704,7 +660,6 @@ sub format_resize {
 
 sub size_as_bounds {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
 
     my $bounds = $obj->screen_bounds;
     my $x = $bounds->{x};
@@ -712,16 +667,10 @@ sub size_as_bounds {
     my $w = $bounds->{w};
     my $h = $bounds->{h};
 
-    $obj->script('
-       tell application "Terminal.app"
-            try
-                set miniaturized of '.$windowid.' to false
-                set size of '.$windowid.' to { '.$w.', '.$h.' }
-                set origin of '.$windowid.' to { '.$x.', '.$y.' }
-                set frontmost of '.$windowid.' to true
-            end try
-        end tell
-    ');
+    $obj->winobj->setMiniaturized_(0);
+    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
+    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+    $obj->winobj->setFrontmost_(1);
 }
 
 sub bounds_as_size {
@@ -933,9 +882,8 @@ sub select_next {
         }
         $y = 0;
     }
+    Growl->notify("Enable", "Enabled next ".$next_obj->hostname);
 
-    
-    
     $obj->set_disabled(1);
     if ($obj->zoomed) {
         $obj->unzoom;
@@ -990,7 +938,6 @@ sub grid {
     my $x = $bounds->{x};
     my $y = $bounds->{h}+$bounds->{y}-$height;
     foreach my $window (@windows) {
-        my $windowid = $window->windowid || next;
         my $slaveid  = $window->slaveid  || next;
 
         if ($x + $width > $bounds->{w} + $bounds->{x}) {
@@ -999,20 +946,13 @@ sub grid {
             push @{$slaveids_by_location}, [];
         }
 
-        $pack->script('
-            ignoring application responses
-                tell application "Terminal.app"
-                    try
-                        set visible of '.$windowid.' to false
-                        set size of '.$windowid.' to { '.$width.', '.$height.' }
-                        set origin of '.$windowid.' to { '.$x.', '.$y.' }
-                        set size of '.$windowid.' to { '.$width.', '.$height.' }
-                        set miniaturized of '.$windowid.' to false
-                        set frontmost of '.$windowid.' to true
-                    end try
-                end tell
-            end ignoring
-        ');
+        $window->winobj->setVisible_(0);
+        $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+        $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+        $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+        $window->winobj->setMiniaturized_(0);
+        $window->winobj->setFrontmost_(1);
+
         *$window->{zoomed} = 0;
 
         push @{$slaveids_by_location->[-1]}, $slaveid;
@@ -1027,8 +967,6 @@ sub grid {
 
 sub zoom {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
-    my $masterid = $obj->master->windowid;
 
     my $bounds = $obj->screen_bounds;
     my $x = $bounds->{x};
@@ -1037,43 +975,24 @@ sub zoom {
     my $h = $bounds->{h};
     my $mh = $config->master_height;
 
-    my $orig_size = $obj->script('
-        tell application "Terminal.app" to return size of '.$windowid
-    );
-    
-    my $orig_origin = $obj->script('
-        tell application "Terminal.app" to return origin of '.$windowid
-    );
+    my $orig_size = $obj->winobj->size;
+    my $orig_origin = $obj->winobj->origin;
 
-    $obj->script('
-       tell application "Terminal.app"
-            try
-                set size of '.$windowid.' to { '.$w.', '.($h-$mh).' }
-                set origin of '.$windowid.' to { '.$x.', '.($y+$mh).' }
-                set frontmost of '.$windowid.' to true
-                set frontmost of '.$masterid.' to true
-            end try
-        end tell
-    ');
+    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,($h-$mh)));
+    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,($y+$mh)));
+    $obj->winobj->setFrontmost_(1);
+    $obj->master->winobj->setFrontmost_(1);
 
     *$obj->{zoomed} = [ $orig_size, $orig_origin ];;
 }
 
 sub unzoom {
     my ($obj) = @_;
-    my $windowid = $obj->windowid;
     my $orig_pos = $obj->zoomed || return;
 
-    $obj->script('
-       tell application "Terminal.app"
-            try
-                set size of '.$windowid.' to '.$orig_pos->[0].'
-                set origin of '.$windowid.' to '.$orig_pos->[1].'
-            end try
-        end tell
-    ');
+    $obj->winobj->setSize_($orig_pos->[0]);
+    $obj->winobj->setOrigin_($orig_pos->[1]);
 }
-
 
 sub zoomed { *{$_[0]}->{zoomed} };
 
@@ -1101,6 +1020,7 @@ sub parse_user_host_port {
     }
 }
 
+
 #==============================================================================#
 
 package CsshX::Launcher;
@@ -1109,7 +1029,7 @@ use base    qw(CsshX::Socket::Selectable);
 use FindBin qw($Bin $Script);
 use POSIX   qw(tmpnam);
 
-my  $script = "$Bin/$Script"; # Path to this script
+my $script = "$Bin/$Script"; # Path to this script
 
 sub new {
     my ($pack) = @_;
@@ -1126,14 +1046,14 @@ sub new {
     my $greeting = "launcher\n";
     local $SIG{USR1} = sub { $ready = 1; };
 
-    my $master_windowid = CsshX::Window::Master->open_window(
+    my $master_tty = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$,
         '--screen', $config->screen, '--debug', $config->debug,
         '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
     ) || die "Master window failed to open";
-    $greeting .= "$master_windowid\n";
+    $greeting .= "$master_tty\n";
 
     # Wait for master to be ready
     for (1..20) {
@@ -1145,14 +1065,14 @@ sub new {
     my $slave_id = 0;
     foreach my $host (@hosts) {
         $slave_id++;
-        my $slave_windowid = CsshX::Window::Slave->open_window(
+        my $slave_tty = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
             '--ssh', $config->ssh,
             '--ssh_args', $config->ssh_args, '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
         ) || next;
-        $greeting .= "$slave_id $slave_windowid\n";
+        $greeting .= "$slave_id $slave_tty\n";
     }
     $greeting .= "done\n";
 
@@ -1178,7 +1098,7 @@ use base qw(CsshX::Window::Slave);
 use base qw(CsshX::Process);
 use Text::ParseWords qw(shellwords);
 
-my $TIOCSTI = 0x80017472; # 10.4/10.5
+my $TIOCSTI = 0x80017472; # 10.5/10.6
 
 sub new {
     my ($pack) = @_;
@@ -1233,6 +1153,11 @@ sub host { *{$_[0]}->{host}; }
 sub set_user { *{$_[0]}->{user} = $_[1]; }
 sub set_port { *{$_[0]}->{port} = $_[1]; }
 sub set_host { *{$_[0]}->{host} = $_[1]; }
+
+sub terminate {
+    Growl->notify("Close", "Closed ".$config->slavehost);
+    $_[0]->SUPER::terminate;
+}
 
 
 #==============================================================================#
@@ -1302,19 +1227,18 @@ sub slaves       { CsshX::Master::Socket::Slave->slaves; }
 sub slave_count  { CsshX::Master::Socket::Slave->slave_count; }
 
 sub register_slave {
-    my ($obj, $slaveid, $hostname, $windowid) = @_;
+    my ($obj, $slaveid, $hostname, $tty) = @_;
 
     my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
                 CsshX::Master::Socket::Slave->new($slaveid);
     
-    $slave->set_windowid($windowid) if $windowid;
+    $slave->find_ids_by_tty($tty) if $tty;
     $slave->set_hostname($hostname) if $hostname;
     $slave->set_master($obj);
         
     return $slave;
 }
         
-
 sub redraw {
     my ($obj) = @_;
     $obj->clear;
@@ -1324,7 +1248,7 @@ sub redraw {
 
 sub arrange_windows {
     my ($obj) = @_;
-    CsshX::Window::Slave->grid($obj, grep {$_->windowid} $obj->slaves);
+    CsshX::Window::Slave->grid($obj, grep {defined $_->windowid} $obj->slaves);
     $obj->format_master();
 }
 
@@ -1462,8 +1386,9 @@ my $modes = {
         }
     },
     'bounds' => {
-        prompt => sub { "Move and resize master to define bounds: (Enter to accept, ".
+        prompt => sub { "Move and resize master with mouse to define bounds: (Enter to accept, ".
         "Esc to cancel)\r\n".
+        "(Also Arrow keys of h,j,k,l can move window, hold Ctrl to resize)\r\n".
         "[r]eset to default, [f]ull screen, [p]rint current bounds" },
         onchange => sub {
             my ($obj) = @_;
@@ -1474,7 +1399,24 @@ my $modes = {
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             while (length $buffer) {
-                if ($buffer =~ s/^\r//) {
+                #print join(' ', map { unpack("H2", $_) } split //, $buffer)."\r\n";
+                if ($buffer =~ s/^(\014|\e\[5C)//) {
+                    $obj->master->grow(1,0);
+                } elsif ($buffer =~ s/^(\010|\e\[5D)//) {
+                    $obj->master->grow(-1,0);
+                } elsif ($buffer =~ s/^(\012|\e\[5A)//) {
+                    $obj->master->grow(0,1);
+                } elsif ($buffer =~ s/^(\013|\e\[5B)//) {
+                    $obj->master->grow(0,-1);
+                } elsif ($buffer =~ s/^(l|\e\[C)//) {
+                    $obj->master->move(1,0)
+                } elsif ($buffer =~ s/^(h|\e\[D)//) {
+                    $obj->master->move(-1,0);
+                } elsif ($buffer =~ s/^(k|\e\[A)//) {
+                    $obj->master->move(0,-1);
+                } elsif ($buffer =~ s/^(j|\e\[B)//) {
+                    $obj->master->move(0,1);
+                } elsif ($buffer =~ s/^\r//) {
                     $obj->master->bounds_as_size;
                     $obj->master->format_master;
                     $obj->master->arrange_windows;
@@ -1561,7 +1503,7 @@ my $modes = {
         },
     },
     'enable' => {
-        prompt => sub { "Select window with cursors: (Esc to exit)\r\n".
+        prompt => sub { "Select window with Arrow keys of h,j,k,l: (Esc to exit)\r\n".
         "[e]nable input, [d]isable input, disable [o]thers, diable [O]thers and zoom, [t]oggle intput" },
         onchange => sub { CsshX::Window::Slave->selection_on; },
         parse_buffer => sub {
@@ -1594,6 +1536,7 @@ my $modes = {
                     }
                 } elsif ($buffer =~ s/^o//) {
                     if (my $selected = CsshX::Window::Slave->selected_window()) {
+                        Growl->notify("Enable","Enabled only ".$selected->hostname);
                         foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                             $window->set_disabled(1) unless $window == $selected;
                         }
@@ -1603,6 +1546,7 @@ my $modes = {
                     }
                 } elsif ($buffer =~ s/^O//) {
                     if (my $selected = CsshX::Window::Slave->selected_window()) {
+                        Growl->notify("Enable", "Zoomed ".$selected->hostname);
                         foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                             $window->set_disabled(1) unless $window == $selected;
                         }
@@ -1750,16 +1694,20 @@ sub terminate {
 }
 
 sub replace_slave {
-    my ($obj, $slaveid, $hostname, $windowid) = @_;
+    my ($obj, $slaveid, $hostname, $tty) = @_;
     my $xy;
+    my ($windowid, $tabid);
     if (my $old = $obj->get_by_slaveid($slaveid)) {
         $hostname ||= $old->hostname;
-        $windowid ||= $old->windowid;
+        $windowid = $old->windowid;
+        $tabid = $old->tabid;
         $xy = [$old->location];
        
     }
     $obj->set_slaveid($slaveid);
-    $obj->set_windowid($windowid) if $windowid;
+    $obj->set_windowid($windowid) if defined $windowid;
+    $obj->set_tabid($tabid) if defined $tabid;
+    $obj->find_ids_by_tty($tty) if $tty;
     $obj->set_hostname($hostname) if $hostname;
     $obj->set_location(@$xy) if $xy;
     $slaves_by_slaveid->{$slaveid} = $obj;
@@ -1793,6 +1741,7 @@ sub next_slaveid {
     return $max_id + 1;
 }
 
+
 #==============================================================================#
 
 package CsshX::Master::Socket::Launcher;
@@ -1811,13 +1760,13 @@ sub parse_buffer {
     while ($buffer =~ s/(.*?)\n//s) {
         my $msg = $1;
         if (!defined $obj->master->windowid) {
-            $obj->master->set_windowid($msg);
+            $obj->master->find_ids_by_tty($msg);
         } elsif ($msg eq 'done') {
             $obj->master->arrange_windows;
             $obj->terminate;
         } elsif ($msg =~ /^(\d+)\s*(.*)$/) {
-            my ($slaveid, $windowid) = ($1, $2);
-            $obj->master->register_slave($slaveid, undef, $windowid);
+            my ($slaveid, $tty) = ($1, $2);
+            $obj->master->register_slave($slaveid, undef, $tty);
         } else {
             warn "Bad Message [$msg]";
             $obj->terminate;
@@ -1834,6 +1783,97 @@ sub terminate {
 
 
 #==============================================================================#
+# Growl support - This is the distilled essence of Mac::Growl
+# 
+
+package Growl;
+
+my ($nc,$ns_dict);
+sub init {
+    return if $config->no_growl;
+
+    $ns_dict = Foundation::objectRefFromPerlRef({
+        AllNotifications  => [ 'Enable', 'Close' ],
+        ApplicationName   => 'csshX',
+        NotificationTitle => 'csshX',
+    });
+
+    $nc = NSDistributedNotificationCenter->defaultCenter;
+
+    my $ws = NSWorkspace->sharedWorkspace;
+    my $pa = $ws->absolutePathForAppBundleWithIdentifier_('com.apple.terminal');
+    $ns_dict->setObject_forKey_($ws->iconForFile_($pa)->TIFFRepresentation, 
+        'ApplicationIcon');
+
+    $nc->postNotificationName_object_userInfo_options_(
+        'GrowlApplicationRegistrationNotification', undef, $ns_dict, 2);
+}
+
+sub notify {
+    my ($pack, $type, $msg) = @_;
+
+    return if $config->no_growl;
+
+    $ns_dict->setObject_forKey_($msg,  'NotificationDescription');
+    $ns_dict->setObject_forKey_($type, 'NotificationName');
+
+    $nc->postNotificationName_object_userInfo_options_(
+        'GrowlNotification', undef, $ns_dict, 2);
+}
+
+#==============================================================================#
+# Wrappers to make Obj-C structures since PerlObjCBridge doesn't handle them
+#
+
+package ObjCStruct;
+
+my %heap; # Used to maintain references to temp perl data structures
+
+use constant Pointer  => 'L!';
+use constant CGFloat  => 'f';
+use constant CGFloatS => length(pack CGFloat,'0');
+
+sub unpack {
+    my ($obj, $struct) = @_;
+    my $int_ptr = ref($obj) ? $$obj : $$struct;
+    my $pac_ptr = pack($obj->Pointer, $int_ptr);
+    my $mem = unpack($obj->_ptr_pack_str, $pac_ptr);
+    return unpack($obj->_mem_pack_str, $mem);
+}
+
+sub new {
+    my ($pack, @vals) = @_;
+    my $mem = pack($pack->_mem_pack_str, @vals);
+    my $pac_ptr = pack($pack->_ptr_pack_str, $mem);
+    my $int_ptr = CORE::unpack($pack->Pointer, $pac_ptr);
+    $heap{$int_ptr} = $mem;
+    bless my $obj = \$int_ptr, ref($pack) || $pack;
+    return $obj;
+}
+
+sub DESTROY { delete $heap{${$_[0]}} }
+
+
+package ObjCStruct::NSPoint;
+# typedef struct _NSPoint { CGFloat x; CGFloat y; } NSPoint;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'2' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+
+package ObjCStruct::NSSize;
+# typedef struct _NSSize { CGFloat width; CGFloat height; } NSSize;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'2' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+
+package ObjCStruct::NSRect;
+# typedef struct _NSRect { NSPoint origin; NSSize size; } NSRect;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'4' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*4 }
+
+
+#==============================================================================#
 # main();
 #
 
@@ -1841,15 +1881,37 @@ package main;
 
 $config = CsshX::Config->new;
 
+die "Sorry, need OS-X 10.5 or higher\n" if ( $config->osver lt qv(10.5.0));
+
+# Workaround for boolean ObjCBridge bug in early 10.6!! rdar://problem/7886872
+# For calls that return bools (which we don't actully use) generate
+# NSAppleScript calls that look like the ScriptingBridge ones.
+if ($config->osver gt qv(10.6.0)) {
+    no warnings qw(once);
+    *make_shim = sub {
+        my $key = shift; return sub {
+            NSAppleScript->alloc->initWithSource_(
+                "tell application \"Terminal\" to set $key of window ".
+                "id ".$_[0]->id." to ".($_[1] ? 'true' : 'false')
+            )->executeAndReturnError_(undef);
+        };
+    };
+    *NSObject::setVisible_      = make_shim('visible');
+    *NSObject::setMiniaturized_ = make_shim('miniaturized');
+    *NSObject::setFrontmost_    = make_shim('frontmost');
+}
+
+Growl->init;
+
 eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }'
     if $config->debug;
 
-if    ($config->help)    { $config->pod(-verbose => 1)                     }
-elsif ($config->man)     { $config->pod(-verbose => 2)                     }
-elsif ($config->version) { die sprintf "csshX v%.2f-$REVISION\n", $VERSION }
-elsif ($config->master)  { CsshX::Master->new()                            }
-elsif ($config->slave)   { CsshX::Slave->new()                             }
-else                     { CsshX::Launcher->new()                          }
+if    ($config->help)    { $config->pod(-verbose => 1)                        }
+elsif ($config->man)     { $config->pod(-verbose => 2)                        }
+elsif ($config->version) { die sprintf "csshX $VERSION-$REVISION\n", $VERSION }
+elsif ($config->master)  { CsshX::Master->new()                               }
+elsif ($config->slave)   { CsshX::Slave->new()                                }
+else                     { CsshX::Launcher->new()                             }
 
 #
 # vim: expandtab sw=4 ts=4 sts=4:
@@ -1888,8 +1950,7 @@ You can also use hostsname ranges, to specify many hosts.
 
 =item B<-l> I<username>, B<--login> I<username>
 
-Remote user to authenticate as for all hosts. This is overridden by
-I<user@>.
+Remote user to authenticate as for all hosts. This is overridden by I<user@>.
 
 =item B<-c> I<configfile>, B<--config> I<configfile>
 
@@ -1909,7 +1970,9 @@ Displays the version of csshX
 
 =item B<--screen> I<number>
 
-Sets the screen on which to display the terminals, if you have multiple monitors.
+Sets the screen on which to display the terminals, if you have multiple 
+monitors.
+
 Default: I<0>  (Main window)
 
 =item B<-x>, B<--tile_x> I<number>
@@ -1943,9 +2006,9 @@ terminal windows.
 
 =item B<--ping_test>, B<--ping> I<number>
 
-To avoid opeining connections to machines that are down, or not running ssh, this
-option will make csshX ping each host/port that is specified. This uses the 
-Net::Ping module to perform a simple syn/ack check.
+To avoid opeining connections to machines that are down, or not running ssh, 
+this option will make csshX ping each host/port that is specified. This uses 
+the Net::Ping module to perform a simple syn/ack check.
 
 Use of this option is highly recomended when subnet ranges are used.
 
@@ -2026,9 +2089,11 @@ Use B<Esc> to return to input mode.
 
 =item B<Ctrl-a c>
 
-Open a new terminal and connect to another host. Prompts for hostname. B<Esc> cancels hostname input.
+Open a new terminal and connect to another host. Prompts for hostname. B<Esc> 
+cancels hostname input.
 
-This does not accept cluster names, ranges or subnets. This might be added in the future.
+This does not accept cluster names, ranges or subnets. This might be added in 
+the future.
 
 =item B<Ctrl-a Ctrl-a> or B<Ctrl-a a>
 
@@ -2122,8 +2187,14 @@ Return to input mode.
 =item B<Ctrl-a b>  
 
 Enter bounds moving and resizing mode. The master window will grow to cover 
-the slave windows. You may then drag and resize the master window to cover
-the area you wish to use. The following keys are available:
+the slave windows. You may then use the mouse to drag and resize the master 
+window to cover the area you wish to use.
+
+If you don't want to reach for the mouse, the B<Arrow> keys (or B<h>,B<j>,B<k>,B<l>)
+can be used to move the window. Holding B<Control> and the previous keys will 
+resize it.
+
+The following keys are also available:
 
 =back
 
@@ -2147,7 +2218,8 @@ Set to bounds to fill screen.
 
 =item B<p>
 
-Print the bounds to the screen in a suitable format for pasting into your csshrc.
+Print the bounds to the screen in a suitable format for pasting into your 
+csshrc.
 
 =back
 
@@ -2155,7 +2227,9 @@ Print the bounds to the screen in a suitable format for pasting into your csshrc
 
 =item B<Ctrl-a s>  
 
-Enter send text mode. This allows you to send preset strings to all active windows.
+Enter send text mode. This allows you to send preset strings to all active 
+windows.
+
 Strings are:
 
 =back
@@ -2174,7 +2248,7 @@ were specified.
 
 =item B<i>
 
-Send the unique B<slave id>. Each slave window is assigned a unique number. This
+Send the unique "slave id". Each slave window is assigned a unique number. This
 might be useful if you have multiple windows on the same host.
 
 =back
@@ -2195,8 +2269,8 @@ Sort by B<hostname>
 
 =item B<i>
 
-Sort by B<slave id>. This will be the same as the order that hosts were specified on
-the command line. (ping_test'ed hosts will not be in any order)
+Sort by "slave id". This will be the same as the order that hosts were specified
+on the command line. (ping_test'ed hosts will not be in any order)
 
 =back
 
@@ -2225,6 +2299,13 @@ Thee default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files
 can be specified with the B<--config> option on the command line.
 
 Hash '#' can be used at any point in the file for comments.
+
+Color specifcations can be in two formats. Applescript format consists of
+three integer values in the form B<{ nnnnn,nnnnn,nnnnn}>, where nnnnn's are
+red, green and blue decimal values between 0 and 65535. Web style 
+B<HHHHHH> style where HH's are red, green and blue hex values between
+00 and FF (note the leading # is not used to avoid confusion with comments).
+
 
 =over 4
 
@@ -2338,6 +2419,10 @@ See --ping_test in L<OPTIONS>
 The timeout, in seconds, for the ping test.
 See --ping_timeout in L<OPTIONS>
 
+=item B<no_growl>
+
+Disable the Growl support (see L<GROWL SUPPORT> for more details).
+
 =item B<debug>
 
 The debug level to use. Defaults to 0.
@@ -2345,25 +2430,32 @@ See --debug in L<OPTIONS>
 
 =back
 
+=head1 GROWL SUPPORT
+
+If Growl is installed, certain events will trigger notifications
+if you do not like these you can either disable them using the 
+B<no_growl> setting in .csshrc, or fine tune the messages in 
+the Growl Preference pane.
+
+For full details of Growl, visit L<http://growl.info/>.
 
 =head1 BUGS
 
-There is a race condition if you change Terminal windows while they
-are being opened. This is due to the inability to get a handle to a window
-until it is opened. Best thing to to do is to let csshX open it's windows
-without clicking on any of them.
+None known. Please submit any bugs you might encounter, or feature
+requests to L<http://code.google.com/p/csshx/issues/>
 
 
 =head1 CREDITS
 
 This software is inspired by the X11 based Cluster-SSH project
 by Duncan Ferguson  L<http://sourceforge.net/projects/clusterssh/>.
-Cluster SSH is much more fully featured than csshX will ever be.
 
 The use of TIOCSTI to feed characters into the slave terminal's
 input buffer was copied from the "Perl Cookbook, 2nd Edition"
 page 482, by Tom Christiansen and Nathan Torkington.
 
+A list of helpful people who have contributed patches to this project 
+is included in the README.txt distributed with csshX.
 
 =head1 AUTHOR
 
@@ -2384,7 +2476,7 @@ under the same terms as Perl itself.
 
 L<http://clusterssh.sourceforge.net/>,
 L<ssh>,
-L<MacPerl>,
+L<Foundation>
 L<perl>
 
 =cut
