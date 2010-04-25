@@ -1830,7 +1830,7 @@ package ObjCStruct;
 my %heap; # Used to maintain references to temp perl data structures
 
 use constant Pointer  => 'L!';
-use constant CGFloat  => 'f';
+use constant CGFloat  => (length pack('L!',0) == 4 ) ? 'f' : 'd'; #32b=f 64b=d
 use constant CGFloatS => length(pack CGFloat,'0');
 
 sub unpack {
