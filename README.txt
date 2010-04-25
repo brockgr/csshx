@@ -11,7 +11,7 @@ As csshX is a command line tool, no special installation is needed. It may
 be copied into a directory in your path, (e.g. /usr/local/bin) for your 
 convenience.
 
-The software has been tested on MacOS-X 10.4 and 10.5 with the default Perl
+The software has been tested on MacOS-X 10.5 and 10.6 with the default Perl
 installation - no additional Perl modules are required.
 
 
