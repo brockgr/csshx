@@ -442,7 +442,12 @@ sub get_shell {
 
 sub find_ids_by_tty {
     my ($obj, $tty) = @_;
+
     my $windows = $terminal->windows;
+
+    # Quickly check if the tty even exists, since the next code is REALLY slow
+    return unless grep { $tty eq $_ } @{Foundation::perlRefFromObjectRef $windows->valueForKey_("tty")};
+
     for (my $n=0; $n<$windows->count; $n++) {
         my $window = $windows->objectAtIndex_($n);
         my $tabs = $window->tabs;
@@ -608,6 +613,12 @@ sub minimise {
     eval { $obj->winobj->setMiniaturized_(1) };
 }
 
+sub terminate {
+    my ($obj) = @_;
+    $obj->set_windowid(undef);
+    $obj->set_tabid(undef);
+    $obj->SUPER::terminate();
+}
 
 #==============================================================================#
 
@@ -1034,7 +1045,7 @@ sub new {
 
     my $master_tty = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$, 
-        '--screen', $config->screen, '--debug', $config->debug+10,
+        '--screen', $config->screen, '--debug', $config->debug,
         '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
@@ -1218,7 +1229,7 @@ sub register_slave {
         my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
                     CsshX::Master::Socket::Slave->new($slaveid);
     
-        $slave->find_ids_by_tty($tty) || die if $tty;
+        $slave->find_ids_by_tty($tty) || $slave->terminate if $tty;
         $slave->set_hostname($hostname) if $hostname;
         $slave->set_master($obj);
             
@@ -1235,7 +1246,7 @@ sub redraw {
 
 sub arrange_windows {
     my ($obj) = @_;
-    CsshX::Window::Slave->grid($obj, grep {defined $_->windowid} $obj->slaves);
+    CsshX::Window::Slave->grid($obj, grep {$_->windowid} $obj->slaves);
     $obj->format_master();
 }
 
