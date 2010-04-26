@@ -455,6 +455,9 @@ sub find_ids_by_tty {
             }
         }
     }
+
+    $obj->set_windowid(undef);
+    $obj->set_tabid(undef);
     return();
 }
 
@@ -471,10 +474,10 @@ sub open_window {
     $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
     # TODO - (t)csh, ksh, zsh 
 
-    my $tabobj = $terminal->doScript_in_($cmd, undef) || die;
-    my $tty = $tabobj->tty->UTF8String || die;
+    my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
+    my $tty = $tabobj->tty->UTF8String || return;
     
-    $pack->find_ids_by_tty($tty) if (ref $pack);
+    $pack->find_ids_by_tty($tty) || return if ref $pack;
 
     return $tty;
 }
@@ -1030,8 +1033,8 @@ sub new {
     local $SIG{USR1} = sub { $ready = 1; };
 
     my $master_tty = CsshX::Window::Master->open_window(
-        $script, '--master', '--sock', $sock, '--launchpid', $$,
-        '--screen', $config->screen, '--debug', $config->debug,
+        $script, '--master', '--sock', $sock, '--launchpid', $$, 
+        '--screen', $config->screen, '--debug', $config->debug+10,
         '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
@@ -1211,15 +1214,16 @@ sub slave_count  { CsshX::Master::Socket::Slave->slave_count; }
 
 sub register_slave {
     my ($obj, $slaveid, $hostname, $tty) = @_;
-
-    my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
-                CsshX::Master::Socket::Slave->new($slaveid);
+    eval {
+        my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
+                    CsshX::Master::Socket::Slave->new($slaveid);
     
-    $slave->find_ids_by_tty($tty) if $tty;
-    $slave->set_hostname($hostname) if $hostname;
-    $slave->set_master($obj);
-        
-    return $slave;
+        $slave->find_ids_by_tty($tty) || die if $tty;
+        $slave->set_hostname($hostname) if $hostname;
+        $slave->set_master($obj);
+            
+        return $slave;
+    };
 }
         
 sub redraw {
@@ -1586,6 +1590,7 @@ sub new {
 sub mode     { *{$_[0]}->{csshx_mode} }
 sub set_mode { 
     my ($obj, $mode) = @_;
+
     if (!$obj->mode || $mode ne $obj->mode) {
         *$obj->{csshx_mode} = $mode;
         $modes->{$mode}->{onchange}->($obj) if $modes->{$mode}->{onchange};
@@ -1683,12 +1688,11 @@ sub replace_slave {
         $windowid = $old->windowid;
         $tabid = $old->tabid;
         $xy = [$old->location];
-       
     }
     $obj->set_slaveid($slaveid);
     $obj->set_windowid($windowid) if defined $windowid;
     $obj->set_tabid($tabid) if defined $tabid;
-    $obj->find_ids_by_tty($tty) if $tty;
+    $obj->find_ids_by_tty($tty) || $obj->terminate if $tty;
     $obj->set_hostname($hostname) if $hostname;
     $obj->set_location(@$xy) if $xy;
     $slaves_by_slaveid->{$slaveid} = $obj;
@@ -1741,7 +1745,7 @@ sub parse_buffer {
     while ($buffer =~ s/(.*?)\n//s) {
         my $msg = $1;
         if (!defined $obj->master->windowid) {
-            $obj->master->find_ids_by_tty($msg);
+            $obj->master->find_ids_by_tty($msg) || die;
         } elsif ($msg eq 'done') {
             $obj->master->arrange_windows;
             $obj->terminate;
