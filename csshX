@@ -61,7 +61,7 @@ sub new {
         ping_timeout               => 2,
         ssh                        => 'ssh',
         no_growl                   => 0,
-        clusters => {}
+        clusters                   => {}
     }, ref($pack) || $pack;
 
     ($obj->{osver} = (uname)[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
@@ -536,10 +536,10 @@ sub screen_bounds {
         ($x,$y,$w,$h) = @{$config->screen_bounds};
     } else {
         my $scr = $config->screen;
-        ($x,$y,$w,$h) = physical_screen_bounds($scr);
+        ($x,$y,$w,$h) = @{physical_screen_bounds($scr)};
     }
-    $max_bounds = { x => $x, y => $y, w => $w, h => $h };
-    return $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+    $max_bounds = [ $x, $y, $w, $h ];
+    return $cur_bounds = [ $x, $y, $w, $h ];
 }
 
 sub physical_screen_bounds { 
@@ -547,70 +547,62 @@ sub physical_screen_bounds {
 
     my $displays =  NSScreen->screens()->count - 1;
     die "No such screen [$scr], screen must be $displays or less"
-        if ($scr > $displays);
+        if $scr > $displays;
 
-    my $frame =  NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
-
-    return ObjCStruct::NSRect->unpack($frame);
+    my $frame = NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
+    return [ObjCStruct::NSRect->unpack($frame)];
 }
 
 sub reset_bounds {
-    my ($obj) = @_;
-    my $x = $max_bounds->{x};
-    my $y = $max_bounds->{y};
-    my $w = $max_bounds->{w};
-    my $h = $max_bounds->{h};
-    $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
+    $cur_bounds = [ @$max_bounds ];
 }
 
-sub max_bounds {
-    my ($x,$y,$w,$h) = physical_screen_bounds($config->screen);
-    $cur_bounds = { x => $x, y => $y, w => $w, h => $h };
-}
-
-sub size {
-    my ($obj) = @_;
-    my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
-    return { w => $w, h => $h };
+sub max_physical_bounds {
+    $cur_bounds = physical_screen_bounds($config->screen);
 }
 
 sub bounds {
     my ($obj) = @_;
     my ($x, $y) = ObjCStruct::NSPoint->unpack($obj->winobj->origin);
     my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
-    return { x => $x, y => $y, w => $w, h => $h };
+    return [ $x, $y, $w, $h ];
 }
 
 sub move {
     my ($obj, $dx, $dy) = @_;
-    my ($x, $y) = ObjCStruct::NSPoint->unpack($obj->winobj->origin);
-    $x += 5 * $dx;
-    $y -= 5 * $dy;
-    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+    eval {
+        my ($x, $y) = ObjCStruct::NSPoint->unpack($obj->winobj->origin);
+        $x += 5 * $dx;
+        $y -= 5 * $dy;
+        $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+    };
 }
 
 sub grow {
     my ($obj, $dw, $dh) = @_;
-    my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
-    $w += 5 * $dw;
-    $h -= 5 * $dh;
-    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
+    eval {
+        my ($w, $h) = ObjCStruct::NSSize->unpack($obj->winobj->size);
+        $w += 5 * $dw;
+        $h -= 5 * $dh;
+        $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
+    };
 }
 
 sub close_window {
     my ($obj) = @_;
-    # Note that Saving is a OSType (bid endian)
-    $obj->winobj->closeSaving_savingIn_(unpack('N', 'no  '),undef);
+    eval {   # Note that Saving is a OSType (bid endian)
+        $obj->winobj->closeSaving_savingIn_(unpack('N', 'no  '),undef);
+    };
 }
     
 sub hide {
     my ($obj) = @_;
-    $obj->winobj->setVisible_(0);
+    eval { $obj->winobj->setVisible_(0) };
 }
 
 sub minimise {
     my ($obj) = @_;
-    $obj->winobj->setMiniaturized_(1);
+    eval { $obj->winobj->setMiniaturized_(1) };
 }
 
 
@@ -627,26 +619,24 @@ sub format_master {
     my $fg = $obj->make_NSColor($config->color_master_foreground);
     my $bg = $obj->make_NSColor($config->color_master_background);
     my $mh = $config->master_height;
-    my $bounds = $obj->screen_bounds;
+    my ($x,$y,$w,$h) = @{$obj->screen_bounds};
 
-    my $x = $bounds->{x};
-    my $w = $bounds->{w};
-    my $y = $bounds->{y};
-
-    $obj->winobj->setMiniaturized_(0);
-    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$mh));
-    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
-    $obj->tabobj->setBackgroundColor_($bg);
-    $obj->tabobj->setNormalTextColor_($fg);
-    $obj->winobj->setFrontmost_(1);
-
-    # Now check the height of the terminal window in case it's larger than 
-    # expected, if so, move it off the bottom of the screen if possible
-
-    my ($real_mw, $real_mh) = ObjCStruct::NSSize->unpack($obj->winobj->size());
-    $obj->winobj->setOrigin_(
-            ObjCStruct::NSPoint->new($x, ($y-($real_mh-$mh)))
-    ) if ($real_mh > $mh);
+    eval { 
+        $obj->winobj->setMiniaturized_(0);
+        $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$mh));
+        $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+        $obj->tabobj->setBackgroundColor_($bg);
+        $obj->tabobj->setNormalTextColor_($fg);
+        $obj->winobj->setFrontmost_(1);
+    
+        # Now check the height of the terminal window in case it's larger than 
+        # expected, if so, move it off the bottom of the screen if possible
+    
+        my ($real_mw, $real_mh) = ObjCStruct::NSSize->unpack($obj->winobj->size());
+        $obj->winobj->setOrigin_(
+                ObjCStruct::NSPoint->new($x, ($y-($real_mh-$mh)))
+        ) if ($real_mh > $mh);
+    };
 }
 
 sub format_resize {
@@ -661,28 +651,19 @@ sub format_resize {
 sub size_as_bounds {
     my ($obj) = @_;
 
-    my $bounds = $obj->screen_bounds;
-    my $x = $bounds->{x};
-    my $y = $bounds->{y};
-    my $w = $bounds->{w};
-    my $h = $bounds->{h};
-
-    $obj->winobj->setMiniaturized_(0);
-    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
-    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
-    $obj->winobj->setFrontmost_(1);
+    my ($x,$y,$w,$h) = @{$obj->screen_bounds};
+    eval {
+        $obj->winobj->setMiniaturized_(0);
+        $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,$h));
+        $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+        $obj->winobj->setFrontmost_(1);
+    };
 }
 
 sub bounds_as_size {
     my ($obj) = @_;
-    
     my $win_bounds = $obj->bounds;
-    my $scr_bounds = $obj->screen_bounds;
-
-    $scr_bounds->{x} = $win_bounds->{x};
-    $scr_bounds->{y} = $win_bounds->{y};
-    $scr_bounds->{h} = $win_bounds->{h};
-    $scr_bounds->{w} = $win_bounds->{w};
+    $cur_bounds = $win_bounds;
 }
 
 
@@ -900,7 +881,7 @@ sub grid {
     return unless @windows;
 
     my $master_height = $config->master_height;
-    my $bounds = $master->screen_bounds;
+    my ($bds_x,$bds_y,$bds_w,$bds_h) = @{$master->screen_bounds};
 
     my $cols = ceil(@windows ** 0.5);
 
@@ -931,27 +912,29 @@ sub grid {
 
     my $rows   = ceil(@windows / $cols);
 
-    my $width  = int($bounds->{w} / $cols);
-    my $height = int(($bounds->{h} - $master_height) / $rows);
+    my $width  = int($bds_w / $cols);
+    my $height = int(($bds_h - $master_height) / $rows);
     $slaveids_by_location = [ [] ];
 
-    my $x = $bounds->{x};
-    my $y = $bounds->{h}+$bounds->{y}-$height;
+    my $x = $bds_x;
+    my $y = $bds_h+$bds_y-$height;
     foreach my $window (@windows) {
         my $slaveid  = $window->slaveid  || next;
 
-        if ($x + $width > $bounds->{w} + $bounds->{x}) {
-            $x = $bounds->{x};
+        if ($x + $width > $bds_w + $bds_x) {
+            $x = $bds_x;
             $y -= $height;
             push @{$slaveids_by_location}, [];
         }
 
-        $window->winobj->setVisible_(0);
-        $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
-        $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
-        $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
-        $window->winobj->setMiniaturized_(0);
-        $window->winobj->setFrontmost_(1);
+        eval {
+            $window->winobj->setVisible_(0);
+            $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
+            $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+            $window->winobj->setMiniaturized_(0);
+            $window->winobj->setFrontmost_(1);
+        };
 
         *$window->{zoomed} = 0;
 
@@ -968,30 +951,30 @@ sub grid {
 sub zoom {
     my ($obj) = @_;
 
-    my $bounds = $obj->screen_bounds;
-    my $x = $bounds->{x};
-    my $y = $bounds->{y};
-    my $w = $bounds->{w};
-    my $h = $bounds->{h};
+    my ($x,$y,$w,$h) = @{$obj->screen_bounds};
     my $mh = $config->master_height;
 
-    my $orig_size = $obj->winobj->size;
-    my $orig_origin = $obj->winobj->origin;
+    eval { 
+        my $orig_size = $obj->winobj->size;
+        my $orig_origin = $obj->winobj->origin;
 
-    $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,($h-$mh)));
-    $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,($y+$mh)));
-    $obj->winobj->setFrontmost_(1);
-    $obj->master->winobj->setFrontmost_(1);
+        $obj->winobj->setSize_(ObjCStruct::NSSize->new($w,($h-$mh)));
+        $obj->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,($y+$mh)));
+        $obj->winobj->setFrontmost_(1);
+        $obj->master->winobj->setFrontmost_(1);
 
-    *$obj->{zoomed} = [ $orig_size, $orig_origin ];;
+        *$obj->{zoomed} = [ $orig_size, $orig_origin ];
+    };
 }
 
 sub unzoom {
     my ($obj) = @_;
     my $orig_pos = $obj->zoomed || return;
 
-    $obj->winobj->setSize_($orig_pos->[0]);
-    $obj->winobj->setOrigin_($orig_pos->[1]);
+    eval { 
+        $obj->winobj->setSize_($orig_pos->[0]);
+        $obj->winobj->setOrigin_($orig_pos->[1]);
+    };
 }
 
 sub zoomed { *{$_[0]}->{zoomed} };
@@ -1431,11 +1414,9 @@ my $modes = {
                 } elsif ($buffer =~ s/^p//) {
                     $obj->master->redraw;
                     my $b = $obj->master->bounds;
-                    print "\r\n\r\nscreen_bounds = {".
-                        join(", ",@{$b}{qw(x y w h)})
-                    ."}\r\n";
+                    print "\r\n\r\nscreen_bounds = {".join(", ",@$b)."}\r\n";
                 } elsif ($buffer =~ s/^f//) {
-                    $obj->master->max_bounds;
+                    $obj->master->max_physical_bounds;
                     $obj->master->size_as_bounds;
                 } else {
                     substr($buffer, 0, 1, '');
@@ -1881,7 +1862,7 @@ package main;
 
 $config = CsshX::Config->new;
 
-die "Sorry, need OS-X 10.5 or higher\n" if ( $config->osver lt qv(10.5.0));
+die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
 
 # Workaround for boolean ObjCBridge bug in early 10.6!! rdar://problem/7886872
 # For calls that return bools (which we don't actully use) generate
