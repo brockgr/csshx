@@ -440,6 +440,9 @@ sub get_shell {
     return $shell;
 }
 
+# Create an OSType (bid endian long) from a string
+sub OSType ($) { return unpack('N', $_[0]) }
+
 sub open_window {
     my ($pack, @args) = @_;
 
@@ -456,9 +459,9 @@ sub open_window {
     my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
 
     my $tab_ed = $tabobj->qualifiedSpecifier;
-    my $tab_id = $tab_ed->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String - 1;
-    my $win_ed = $tab_ed->descriptorForKeyword_(unpack('N','from'));
-    my $win_id = $win_ed->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String;
+    my $tab_id = $tab_ed->descriptorForKeyword_(OSType 'seld')->int32Value - 1;
+    my $win_ed = $tab_ed->descriptorForKeyword_(OSType 'from');
+    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value;
 
     return($win_id, $tab_id);
 }
@@ -574,8 +577,8 @@ sub grow {
 
 sub close_window {
     my ($obj) = @_;
-    eval {   # Note that Saving is a OSType (bid endian)
-        $obj->winobj->closeSaving_savingIn_(unpack('N', 'no  '),undef);
+    eval {
+        $obj->winobj->closeSaving_savingIn_(OSType 'no  ',undef);
     };
 }
     
@@ -1805,21 +1808,23 @@ package ObjCStruct;
 
 my %heap; # Used to maintain references to temp perl data structures
 
-use constant Pointer  => 'L!';
-use constant CGFloat  => (length pack('L!',0) == 4 ) ? 'f' : 'd'; #32b=f 64b=d
+use constant Pointer  => 'L!'; # Assume OS pointers are longs
+
+# Get the size of a CGFloat - 32bit=float 64bit=double
+use constant CGFloat  => (length pack('L!',0) == 4 ) ? 'f' : 'd';
 use constant CGFloatS => length(pack CGFloat,'0');
 
 sub unpack {
     my ($obj, $struct) = @_;
     my $int_ptr = ref($obj) ? $$obj : $$struct;
     my $pac_ptr = pack($obj->Pointer, $int_ptr);
-    my $mem = unpack($obj->_ptr_pack_str, $pac_ptr);
+    my $mem     = unpack($obj->_ptr_pack_str, $pac_ptr);
     return unpack($obj->_mem_pack_str, $mem);
 }
 
 sub new {
     my ($pack, @vals) = @_;
-    my $mem = pack($pack->_mem_pack_str, @vals);
+    my $mem     = pack($pack->_mem_pack_str, @vals);
     my $pac_ptr = pack($pack->_ptr_pack_str, $mem);
     my $int_ptr = CORE::unpack($pack->Pointer, $pac_ptr);
     $heap{$int_ptr} = $mem;
@@ -1829,24 +1834,23 @@ sub new {
 
 sub DESTROY { delete $heap{${$_[0]}} }
 
-
 package ObjCStruct::NSPoint;
 # typedef struct _NSPoint { CGFloat x; CGFloat y; } NSPoint;
 use base qw(ObjCStruct);
-sub _mem_pack_str { $_[0]->CGFloat.'2' }
-sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+use constant _mem_pack_str =>     __PACKAGE__->CGFloat.'2';
+use constant _ptr_pack_str => 'P'.__PACKAGE__->CGFloatS*2;
 
 package ObjCStruct::NSSize;
 # typedef struct _NSSize { CGFloat width; CGFloat height; } NSSize;
 use base qw(ObjCStruct);
-sub _mem_pack_str { $_[0]->CGFloat.'2' }
-sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+use constant _mem_pack_str =>     __PACKAGE__->CGFloat.'2';
+use constant _ptr_pack_str => 'P'.__PACKAGE__->CGFloatS*2;
 
 package ObjCStruct::NSRect;
 # typedef struct _NSRect { NSPoint origin; NSSize size; } NSRect;
 use base qw(ObjCStruct);
-sub _mem_pack_str { $_[0]->CGFloat.'4' }
-sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*4 }
+use constant _mem_pack_str =>     __PACKAGE__->CGFloat.'4';
+use constant _ptr_pack_str => 'P'.__PACKAGE__->CGFloatS*4;
 
 
 #==============================================================================#
@@ -1866,10 +1870,12 @@ if ($config->osver gt qv(10.6.0)) {
     no warnings qw(once);
     *make_shim = sub {
         my $key = shift; return sub {
-            NSAppleScript->alloc->initWithSource_(
+            my $as = NSAppleScript->alloc->initWithSource_(
                 "tell application \"Terminal\" to set $key of window ".
                 "id ".$_[0]->id." to ".($_[1] ? 'true' : 'false')
-            )->executeAndReturnError_(undef);
+            );
+            $as->executeAndReturnError_(undef);
+            $as->release;
         };
     };
     *NSObject::setVisible_      = make_shim('visible');
