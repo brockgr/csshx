@@ -600,35 +600,34 @@ sub minimise {
     eval { $obj->winobj->setMiniaturized_(1) };
 }
 
+sub run_ruby {
+    my ($obj, $code, @args) = @_;
+    open(my $ruby, '|-', '/usr/bin/ruby', '-', @args);
+    print $ruby $code;
+    close($ruby);
+    return $? >> 8;
+}
+
 sub set_space {
     my ($obj, $space) = @_;
-
-    open(my $ruby, '|-', '/usr/bin/ruby', '-', $obj->windowid, $space);
-    print $ruby "
+    $obj->run_ruby("
         require 'dl'
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
         con = dl.sym('_CGSDefaultConnection', 'I').call()
         dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], [Integer(ARGV[0])], 1, Integer(ARGV[1]))
-    ";
-    close($ruby);
+    ", $obj->windowid, $space);
 }
-
 
 sub space {
     my ($obj) = @_;
-
-    open(my $ruby, '|-', '/usr/bin/ruby', '-', $obj->windowid);
-    print $ruby "
+    $obj->run_ruby("
         require 'dl'
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
         con = dl.sym('_CGSDefaultConnection', 'I').call()
         r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], Integer(ARGV[0]), 0)
         exit rs[2]
-    ";
-    close($ruby);
-    die $?;
+    ", $obj->windowid);
 }
-
 
 sub terminate {
     my ($obj) = @_;
@@ -699,19 +698,14 @@ sub bounds_as_size {
 
 sub move_slaves_to_master_space {
     my ($obj) = @_;
-
-    open(my $ruby, '|-', '/usr/bin/ruby', '-',
-        map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
-
-    print $ruby "
+    $obj->run_ruby("
         require 'dl';
         ARGV.map! {|wid| Integer(wid)}
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
         con = dl.sym('_CGSDefaultConnection', 'I').call()
         r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], ARGV.shift, 0)
         dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], ARGV, ARGV.length, rs[2])
-    ";
-    close($ruby);
+    ", map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
 }
 
 
