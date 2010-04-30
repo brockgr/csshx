@@ -592,6 +592,22 @@ sub minimise {
     eval { $obj->winobj->setMiniaturized_(1) };
 }
 
+sub space {
+    my ($obj) = @_;
+
+    open(my $ruby, '|-', '/usr/bin/ruby', '-', $obj->windowid);
+    print $ruby "
+        require 'dl';
+        dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        con = dl.sym('_CGSDefaultConnection', 'I').call()
+        r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], Integer(ARGV[0]), 0)
+        exit rs[2]
+    ";
+    close($ruby);
+    die $?;
+}
+
+
 sub terminate {
     my ($obj) = @_;
     $obj->set_windowid(undef);
@@ -659,6 +675,22 @@ sub bounds_as_size {
     $cur_bounds = $win_bounds;
 }
 
+sub move_slaves_to_master_space {
+    my ($obj) = @_;
+
+    open(my $ruby, '|-', '/usr/bin/ruby', '-',
+        map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
+
+    print $ruby "
+        require 'dl';
+        ARGV.map! {|wid| Integer(wid)}
+        dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        con = dl.sym('_CGSDefaultConnection', 'I').call()
+        r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], ARGV.shift, 0)
+        dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], ARGV, ARGV.length, rs[2])
+    ";
+    close($ruby);
+}
 
 
 #==============================================================================#
@@ -1396,6 +1428,7 @@ my $modes = {
                     $obj->master->move(0,1);
                 } elsif ($buffer =~ s/^\r//) {
                     $obj->master->bounds_as_size;
+                    $obj->master->move_slaves_to_master_space();
                     $obj->master->format_master;
                     $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
@@ -1423,7 +1456,7 @@ my $modes = {
     },
     'sendstring' => {
         prompt => sub { "Send string to all active windows: (Esc to exit)\r\n".
-        "[h]ostname, [c]onnection string, window [i]d" },
+        "[h]ostname, [c]onnection string, window [i]d, [s]lave id" },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
             while (length $buffer) {
@@ -1440,6 +1473,11 @@ my $modes = {
                     }
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^i//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->send_input($window->windowid) unless $window->disabled;
+                    }
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^s//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->send_input($window->slaveid) unless $window->disabled;
                     }
@@ -2423,7 +2461,10 @@ For full details of Growl, visit L<http://growl.info/>.
 
 =head1 BUGS
 
-None known. Please submit any bugs you might encounter, or feature
+If you use Spaces and drag the bounds window to another
+space, the slave windows will not follow.
+
+Please submit any other bugs you might encounter, or feature
 requests to L<http://code.google.com/p/csshx/issues/>
 
 
