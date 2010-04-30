@@ -440,32 +440,6 @@ sub get_shell {
     return $shell;
 }
 
-sub find_ids_by_tty {
-    my ($obj, $tty) = @_;
-
-    my $windows = $terminal->windows;
-
-    # Quickly check if the tty even exists, since the next code is REALLY slow
-    return unless grep { $tty eq $_ } @{Foundation::perlRefFromObjectRef $windows->valueForKey_("tty")};
-
-    for (my $n=0; $n<$windows->count; $n++) {
-        my $window = $windows->objectAtIndex_($n);
-        my $tabs = $window->tabs;
-        for (my $m=0; $m<$tabs->count; $m++) {
-            my $tab = $tabs->objectAtIndex_($m);
-            if ($tab->tty && ($tab->tty->UTF8String eq $tty)) {
-                $obj->set_windowid("".$window->id);
-                $obj->set_tabid($m);
-                return 1;
-            }
-        }
-    }
-
-    $obj->set_windowid(undef);
-    $obj->set_tabid(undef);
-    return();
-}
-
 sub open_window {
     my ($pack, @args) = @_;
 
@@ -480,11 +454,13 @@ sub open_window {
     # TODO - (t)csh, ksh, zsh 
 
     my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
-    my $tty = $tabobj->tty->UTF8String || return;
-    
-    $pack->find_ids_by_tty($tty) || return if ref $pack;
 
-    return $tty;
+    my $tab_ed = $tabobj->qualifiedSpecifier;
+    my $tab_id = $tab_ed->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String - 1;
+    my $win_ed = $tab_ed->descriptorForKeyword_(unpack('N','from'));
+    my $win_id = $win_ed->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String;
+
+    return($win_id, $tab_id);
 }
 
 sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
@@ -1043,14 +1019,14 @@ sub new {
     my $greeting = "launcher\n";
     local $SIG{USR1} = sub { $ready = 1; };
 
-    my $master_tty = CsshX::Window::Master->open_window(
+    my ($win_id, $tab_id) = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$, 
         '--screen', $config->screen, '--debug', $config->debug,
         '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
-    ) || die "Master window failed to open";
-    $greeting .= "$master_tty\n";
+    ) or die "Master window failed to open";
+    $greeting .= "$win_id,$tab_id\n";
 
     # Wait for master to be ready
     for (1..20) {
@@ -1062,14 +1038,14 @@ sub new {
     my $slave_id = 0;
     foreach my $host (@hosts) {
         $slave_id++;
-        my $slave_tty = CsshX::Window::Slave->open_window(
+        my ($slave_win_id, $slave_tab_id) = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
             '--ssh', $config->ssh,
             '--ssh_args', $config->ssh_args, '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
-        ) || next;
-        $greeting .= "$slave_id $slave_tty\n";
+        ) or next;
+        $greeting .= "$slave_id $slave_win_id,$slave_tab_id\n";
     }
     $greeting .= "done\n";
 
@@ -1224,12 +1200,13 @@ sub slaves       { CsshX::Master::Socket::Slave->slaves; }
 sub slave_count  { CsshX::Master::Socket::Slave->slave_count; }
 
 sub register_slave {
-    my ($obj, $slaveid, $hostname, $tty) = @_;
+    my ($obj, $slaveid, $hostname, $win_id, $tab_id) = @_;
     eval {
         my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
                     CsshX::Master::Socket::Slave->new($slaveid);
     
-        $slave->find_ids_by_tty($tty) || $slave->terminate if $tty;
+        $slave->set_windowid($win_id) if $win_id;
+        $slave->set_tabid($tab_id)    if $win_id; # Yes - tab_id can be 0
         $slave->set_hostname($hostname) if $hostname;
         $slave->set_master($obj);
             
@@ -1573,15 +1550,17 @@ my $modes = {
                     my $sock = $config->sock;
                     my $login = $config->login || '';
                     my @config = @{$config->config};
-                    my $slave = $obj->master->register_slave($slaveid, $hostname, undef);
-                    $slave->open_window(
+                    my $slave = $obj->master->register_slave($slaveid, $hostname);
+                    my ($win_id, $tab_id) = $slave->open_window(
                         $script, '--slave', '--sock', $sock, 
                         '--slavehost', $hostname, '--slaveid', $slaveid,
                         '--ssh', $config->ssh,
                         '--ssh_args', $config->ssh_args, '--debug', $config->debug,
                         $login  ? ( '--login',    $login  ) :(),
                         (map { ('--config', $_) } @config),
-                    );
+                    ) or return;
+                    $slave->set_windowid($win_id);
+                    $slave->set_tabid($tab_id);
                     $obj->master->arrange_windows;
                 }
                 return $obj->set_mode_and_parse('input', $buffer);
@@ -1643,7 +1622,7 @@ sub parse_buffer {
         if ($type =~ /^slave\s+(\d+)\s+(\S+)$/) {
             my ($slaveid, $hostname) = ($1,$2);
             bless $obj, 'CsshX::Master::Socket::Slave';
-            $obj->replace_slave($slaveid, $hostname, undef);
+            $obj->replace_slave($slaveid, $hostname, undef, undef);
         } elsif ($type eq "launcher") {
             bless $obj, 'CsshX::Master::Socket::Launcher';
             $obj->master->set_launcher($obj);
@@ -1691,7 +1670,7 @@ sub terminate {
 }
 
 sub replace_slave {
-    my ($obj, $slaveid, $hostname, $tty) = @_;
+    my ($obj, $slaveid, $hostname, $win_id, $tab_id) = @_;
     my $xy;
     my ($windowid, $tabid);
     if (my $old = $obj->get_by_slaveid($slaveid)) {
@@ -1703,7 +1682,6 @@ sub replace_slave {
     $obj->set_slaveid($slaveid);
     $obj->set_windowid($windowid) if defined $windowid;
     $obj->set_tabid($tabid) if defined $tabid;
-    $obj->find_ids_by_tty($tty) || $obj->terminate if $tty;
     $obj->set_hostname($hostname) if $hostname;
     $obj->set_location(@$xy) if $xy;
     $slaves_by_slaveid->{$slaveid} = $obj;
@@ -1756,13 +1734,15 @@ sub parse_buffer {
     while ($buffer =~ s/(.*?)\n//s) {
         my $msg = $1;
         if (!defined $obj->master->windowid) {
-            $obj->master->find_ids_by_tty($msg) || die;
+            my ($win_id,$tab_id) = split ',', $1;
+            $obj->master->set_windowid($win_id);
+            $obj->master->set_tabid($tab_id);
         } elsif ($msg eq 'done') {
             $obj->master->arrange_windows;
             $obj->terminate;
         } elsif ($msg =~ /^(\d+)\s*(.*)$/) {
-            my ($slaveid, $tty) = ($1, $2);
-            $obj->master->register_slave($slaveid, undef, $tty);
+            my ($slaveid, $ids) = ($1, $2);
+            $obj->master->register_slave($slaveid, undef, split ',', $ids);
         } else {
             warn "Bad Message [$msg]";
             $obj->terminate;
