@@ -33,7 +33,7 @@ my @config_keys = qw(
     color_setbounds_background color_setbounds_foreground
     tile_x tile_y ssh_args no_growl
     config help launchpid login man master
-    master_height screen_bounds screen debug
+    master_height screen_bounds screen space debug
     slave slavehost slaveid sock version osver
     session_max ping_test ping_timeout ssh
 );
@@ -52,6 +52,7 @@ sub new {
         color_setbounds_foreground => '',
         master_height              => 87, # Pixels
         screen                     => 0,
+        space                      => 0,
         debug                      => 0,
         tile_x                     => 0,
         tile_y                     => 0,
@@ -73,8 +74,9 @@ sub new {
         "config|c=s@", "login|l=s",    "master",         "slave",
         "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
         "tile_x|x=i",  "tile_y|y=i",   "ping_test|ping", "ping_timeout=i",
-        "screen=i",    "ssh_args=s",   "debug:+",        "session_max=i",
-        "help|h",      "man|m",        "version|v",      "ssh=s",
+        "screen=i",    "space=i",      "ssh_args=s",     "debug:+",
+        "session_max=i", "help|h",     "man|m",          "version|v",
+        "ssh=s",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     $obj->load_csshrc($_) foreach @{$obj->{config}};
@@ -461,18 +463,24 @@ sub open_window {
     my $tab_ed = $tabobj->qualifiedSpecifier;
     my $tab_id = $tab_ed->descriptorForKeyword_(OSType 'seld')->int32Value - 1;
     my $win_ed = $tab_ed->descriptorForKeyword_(OSType 'from');
-    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value;
+    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value + 0;
 
-    return($win_id, $tab_id);
+    my $obj = ref $pack ? $pack : $pack->SUPER::new();
+    $obj->set_windowid($win_id);
+    $obj->set_tabid($tab_id);
+    return $obj;
 }
+
 
 sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
 sub windowid      { *{$_[0]}->{windowid};         }
 
-sub set_tabid  { *{$_[0]}->{tabid} = $_[1]; }
-sub tabid      { *{$_[0]}->{tabid};         }
+sub set_tabid     { *{$_[0]}->{tabid} = $_[1]; }
+sub tabid         { *{$_[0]}->{tabid};         }
 
-sub winobj { $terminal->windows->objectWithID_($_[0]->windowid) }
+sub uid           {  $_[0]->windowid.','. $_[0]->tabid }
+
+sub winobj { $terminal->windows->objectWithID_($_[0]->windowid.'') }
 sub tabobj { $_[0]->winobj->tabs->objectAtIndex_($_[0]->tabid) }
 
 sub set_color {
@@ -592,12 +600,26 @@ sub minimise {
     eval { $obj->winobj->setMiniaturized_(1) };
 }
 
+sub set_space {
+    my ($obj, $space) = @_;
+
+    open(my $ruby, '|-', '/usr/bin/ruby', '-', $obj->windowid, $space);
+    print $ruby "
+        require 'dl'
+        dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        con = dl.sym('_CGSDefaultConnection', 'I').call()
+        dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], [Integer(ARGV[0])], 1, Integer(ARGV[1]))
+    ";
+    close($ruby);
+}
+
+
 sub space {
     my ($obj) = @_;
 
     open(my $ruby, '|-', '/usr/bin/ruby', '-', $obj->windowid);
     print $ruby "
-        require 'dl';
+        require 'dl'
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
         con = dl.sym('_CGSDefaultConnection', 'I').call()
         r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], Integer(ARGV[0]), 0)
@@ -1054,14 +1076,15 @@ sub new {
     my $greeting = "launcher\n";
     local $SIG{USR1} = sub { $ready = 1; };
 
-    my ($win_id, $tab_id) = CsshX::Window::Master->open_window(
+    my $master = CsshX::Window::Master->open_window(
         $script, '--master', '--sock', $sock, '--launchpid', $$, 
         '--screen', $config->screen, '--debug', $config->debug,
         '--tile_y', $config->tile_y, '--tile_x', $config->tile_x,
         $login  ? ( '--login',    $login  ) :(),
         (map { ('--config', $_) } @config),
     ) or die "Master window failed to open";
-    $greeting .= "$win_id,$tab_id\n";
+    $greeting .= $master->uid."\n";
+    $master->set_space($config->space) if $config->space;
 
     # Wait for master to be ready
     for (1..20) {
@@ -1073,14 +1096,15 @@ sub new {
     my $slave_id = 0;
     foreach my $host (@hosts) {
         $slave_id++;
-        my ($slave_win_id, $slave_tab_id) = CsshX::Window::Slave->open_window(
+        my $slave = CsshX::Window::Slave->open_window(
             $script, '--slave', '--sock', $sock, '--slavehost', $host,
             '--ssh', $config->ssh,
             '--ssh_args', $config->ssh_args, '--debug', $config->debug,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
         ) or next;
-        $greeting .= "$slave_id $slave_win_id,$slave_tab_id\n";
+        $greeting .= "$slave_id ".$slave->uid."\n";
+        $slave->set_space($config->space) if $config->space;
     }
     $greeting .= "done\n";
 
@@ -1239,7 +1263,7 @@ sub register_slave {
     eval {
         my $slave = CsshX::Master::Socket::Slave->get_by_slaveid($slaveid) || 
                     CsshX::Master::Socket::Slave->new($slaveid);
-    
+
         $slave->set_windowid($win_id) if $win_id;
         $slave->set_tabid($tab_id)    if $win_id; # Yes - tab_id can be 0
         $slave->set_hostname($hostname) if $hostname;
@@ -1591,8 +1615,8 @@ my $modes = {
                     my $sock = $config->sock;
                     my $login = $config->login || '';
                     my @config = @{$config->config};
-                    my $slave = $obj->master->register_slave($slaveid, $hostname);
-                    my ($win_id, $tab_id) = $slave->open_window(
+                    my $slave = $obj->master->register_slave($slaveid, $hostname, undef, undef);
+                    $slave->open_window(
                         $script, '--slave', '--sock', $sock, 
                         '--slavehost', $hostname, '--slaveid', $slaveid,
                         '--ssh', $config->ssh,
@@ -1600,8 +1624,7 @@ my $modes = {
                         $login  ? ( '--login',    $login  ) :(),
                         (map { ('--config', $_) } @config),
                     ) or return;
-                    $slave->set_windowid($win_id);
-                    $slave->set_tabid($tab_id);
+
                     $obj->master->arrange_windows;
                 }
                 return $obj->set_mode_and_parse('input', $buffer);
@@ -1993,6 +2016,10 @@ Displays the version of csshX
 Sets the screen on which to display the terminals, if you have multiple 
 monitors.
 
+=item B<--space> I<number>
+
+Sets the space (if spaces are enabled) on which to display the terminals.
+
 Default: I<0>  (Main window)
 
 =item B<-x>, B<--tile_x> I<number>
@@ -2268,6 +2295,11 @@ were specified.
 
 =item B<i>
 
+Send the unique "window id". Each window is assigned a unique number. This
+might be useful if you need to applescript the windows.
+
+=item B<s>
+
 Send the unique "slave id". Each slave window is assigned a unique number. This
 might be useful if you have multiple windows on the same host.
 
@@ -2414,6 +2446,11 @@ terminal windows. Default is the actual screen size. Format is:
 (csshX only) The screen number which to draw the terminal windows.
 See --screen in L<OPTIONS>
 
+=item B<space>
+
+(csshX only) The space in which to draw the terminal windows.
+See --space in L<OPTIONS>
+
 =item B<ssh>
 
 Command to be used instead of B<ssh>.
@@ -2461,10 +2498,7 @@ For full details of Growl, visit L<http://growl.info/>.
 
 =head1 BUGS
 
-If you use Spaces and drag the bounds window to another
-space, the slave windows will not follow.
-
-Please submit any other bugs you might encounter, or feature
+None known.  Please submit any bugs you might encounter, or feature
 requests to L<http://code.google.com/p/csshx/issues/>
 
 
