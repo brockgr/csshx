@@ -676,7 +676,8 @@ sub format_resize {
     my $bg_color = $config->color_setbounds_background;
     my $fg_color = $config->color_setbounds_foreground;
     
-    $obj->set_color($bg_color, $fg_color);
+    $obj->set_bg_color($bg_color) if $bg_color;
+    $obj->set_fg_color($fg_color) if $fg_color;
 }
 
 sub size_as_bounds {
@@ -1008,8 +1009,6 @@ my $script = "$Bin/$Script"; # Path to this script
 
 sub new {
     my ($pack) = @_;
-
-    $0 = 'csshX - Launcher';
 
     # Call, just to make sure screen number is sane
     CsshX::Window->screen_bounds;
@@ -2059,7 +2058,7 @@ You can specify subnets using two syntaxes:
 This will also work with a hostname, assuming it resolves to a valid IP
 
 If the IP address is not the network address, only that IP and IPs above 
-that address will be used (e.g. 192.168.0.14/28 will only use 2 ip addresses).
+that address will be used (e.g. 192.168.0.14/28 will only use 2 IP addresses).
 
 =item B<Ranges>
 
@@ -2078,7 +2077,7 @@ Some examples:
 =head1 WINDOW CONTROL
 
 The master window allows additional windows to be opened, control of input
-to be selected and re-tiling. These are all accessed using the B<Ctrl-a> key
+to be selected and re-tiling. These are all accessed using B<Ctrl-a> key
 combination.
 
 Use B<Esc> to return to input mode.
@@ -2115,7 +2114,7 @@ Minimise all windows. (Use retile to restore)
 
 =item B<Ctrl-a h>  
 
-Hide  all windows. This is much faster than minimising since there is no 
+Hide all windows. This is much faster than minimising since there is no 
 animation. (Use retile to restore)
 
 =item B<Ctrl-a Ctrl-h>  
@@ -2159,7 +2158,7 @@ Enable input for selected window.
 
 =item B<d>  
 
-Disnable input for selected window.
+Disable input for selected window.
 
 =item B<t>  
 
@@ -2186,7 +2185,8 @@ Return to input mode.
 
 Enter bounds moving and resizing mode. The master window will grow to cover 
 the slave windows. You may then use the mouse to drag and resize the master 
-window to cover the area you wish to use.
+window to cover the area you wish to use. You may drag the window across to
+other screens or spaces.
 
 If you don't want to reach for the mouse, the B<Arrow> keys (or B<h>,B<j>,B<k>,B<l>)
 can be used to move the window. Holding B<Control> and the previous keys will 
@@ -2246,8 +2246,8 @@ were specified.
 
 =item B<i>
 
-Send the unique "window id". Each window is assigned a unique number. This
-might be useful if you need to applescript the windows.
+Send the unique "window id". Each window is assigned a unique number by the 
+operating system. This might be useful if you need to applescript the windows.
 
 =item B<s>
 
@@ -2281,7 +2281,7 @@ on the command line. (ping_test'ed hosts will not be in any order)
 =head1 CONFIGURATION FILES
 
 B<csshX> accepts Cluster-SSH B<clusters> and B<csshrc> style configurations.
-Only a subset of attributes are currently supported, and a few attribute have
+Not all Cluster-SSH attributes are supported, and a few attribute have
 been added.
 
 =head2 CLUSTERS
@@ -2304,7 +2304,7 @@ can be specified with the B<--config> option on the command line.
 Hash '#' can be used at any point in the file for comments.
 
 Color specifcations can be in two formats. Applescript format consists of
-three integer values in the form B<{ nnnnn,nnnnn,nnnnn}>, where nnnnn's are
+three integer values in the form B<{ nnnnn,nnnnn,nnnnn }>, where nnnnn's are
 red, green and blue decimal values between 0 and 65535. Web style 
 B<HHHHHH> style where HH's are red, green and blue hex values between
 00 and FF (note the leading # is not used to avoid confusion with comments).
