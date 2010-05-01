@@ -26,6 +26,7 @@ use Getopt::Long;
 use Socket;
 use POSIX qw(uname);
 
+# All possible config keys
 my @config_keys = qw(
     color_selected_foreground color_selected_background
     color_disabled_foreground color_disabled_background
@@ -41,6 +42,7 @@ my @config_keys = qw(
 sub new {
     my ($pack) = @_;
     
+    # Default config settings
     bless my $obj = {
         color_disabled_background  => '',
         color_disabled_foreground  => '{37779,37779,37779}',
@@ -70,6 +72,7 @@ sub new {
     $obj->load_clusters("/etc/clusters");
     $obj->load_csshrc($_) foreach ("/etc/csshrc", "$ENV{HOME}/.csshrc");
 
+    # Command line options - must map to config keys
     GetOptions($obj, 
         "config|c=s@", "login|l=s",    "master",         "slave",
         "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
@@ -79,6 +82,7 @@ sub new {
         "ssh=s",
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
+    # Load any extra configs specified in config file or command line
     $obj->load_csshrc($_) foreach @{$obj->{config}};
 
     return $obj;
@@ -132,7 +136,7 @@ sub load_csshrc {
         }
     }
     foreach my $key (@config_keys) {
-        $obj->{$key} = $settings{$key} if $settings{$key};
+        $obj->{$key} = $settings{$key} if exists $settings{$key};
     }
 }
 
@@ -419,8 +423,9 @@ sub make_NSColor {
     return NSColor->colorWithCalibratedRed_green_blue_alpha_($r,$g,$b,0);
 }
 
-sub get_shell {
-    my $shell;
+my $shell;
+sub get_shell () {
+    return $shell if $shell; # Cached for speed
 
     # Check Terminal.app settings
     if (my $defs = NSUserDefaults->alloc->init) {
@@ -460,14 +465,17 @@ sub open_window {
 
     my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
 
-    my $tab_ed = $tabobj->qualifiedSpecifier;
-    my $tab_id = $tab_ed->descriptorForKeyword_(OSType 'seld')->int32Value - 1;
+    # Get the window and tab IDs from the Apple Event itself
+    my $tab_ed = $tabobj->qualifiedSpecifier; # Undocumented call
+    my $tab_id = $tab_ed->descriptorForKeyword_(OSType 'seld')->int32Value-1;
     my $win_ed = $tab_ed->descriptorForKeyword_(OSType 'from');
-    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value + 0;
+    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value.'';
 
+    # Create an object unless we were passed one
     my $obj = ref $pack ? $pack : $pack->SUPER::new();
     $obj->set_windowid($win_id);
     $obj->set_tabid($tab_id);
+
     return $obj;
 }
 
@@ -480,46 +488,39 @@ sub tabid         { *{$_[0]}->{tabid};         }
 
 sub uid           {  $_[0]->windowid.','. $_[0]->tabid }
 
-sub winobj { $terminal->windows->objectWithID_($_[0]->windowid.'') }
+sub winobj { $terminal->windows->objectWithID_($_[0]->windowid) }
 sub tabobj { $_[0]->winobj->tabs->objectAtIndex_($_[0]->tabid) }
 
-sub set_color {
-    my ($obj, $bg_color, $fg_color) = @_;
-
-    if ($bg_color) {
-        $obj->tabobj->setBackgroundColor_($obj->make_NSColor($bg_color));
-    }
-    if ($fg_color) {
-        $obj->tabobj->setNormalTextColor_($obj->make_NSColor($fg_color));
-        #$obj->tabobj->setBoldTextColor_($obj->make_NSColor($fg_color));
-    }
-
+sub set_bg_color {
+    my ($obj, $bg_color) = @_;
+    $obj->tabobj->setBackgroundColor_($obj->make_NSColor($bg_color));
 }
 
-sub store_color {
-    my ($obj, $bg, $fg) = @_;
-    *$obj->{'stored_color'} ||= {};
-    if ($bg) {
-        *$obj->{'stored_color'}->{bg} = $obj->tabobj->backgroundColor();
-    }
-
-    if ($fg) {
-        *$obj->{'stored_color'}->{fg} = $obj->tabobj->normalTextColor();
-        #*$obj->{'stored_color'}->{fg} = $obj->tabobj->boldTextColor();
-    }
+sub set_fg_color {
+    my ($obj, $fg_color) = @_;
+    $obj->tabobj->setNormalTextColor_($obj->make_NSColor($fg_color));
 }
 
-sub stored_color { *{$_[0]}->{'stored_color'} || {}; }
-
-sub restore_color {
-    my ($obj, $type) = @_;
-    if (my $store = *$obj->{'stored_color'}) {
-        $obj->set_color(
-            *$obj->{'stored_color'}->{bg} || '',
-            *$obj->{'stored_color'}->{fg} || ''
-        );
-    }
+sub store_bg_color {
+    my ($obj, $bg) = @_;
+    *$obj->{'stored_bg_color'} = $obj->tabobj->backgroundColor();
 }
+
+sub store_fg_color {
+    my ($obj, $fg) = @_;
+    *$obj->{'stored_fg_color'} = $obj->tabobj->normalTextColor();
+}
+
+sub fetch_bg_color {
+    my ($obj) = @_;
+    return *$obj->{'stored_bg_color'} || '';
+}
+
+sub fetch_fg_color {
+    my ($obj) = @_;
+    return *$obj->{'stored_fg_color'} || '';
+}
+
 
 sub screen_bounds { 
     my ($obj) = @_;
@@ -728,99 +729,49 @@ sub set_location  {
 sub disabled      { *{$_[0]}->{disabled}; }
 sub set_disabled  {
     my ($obj, $value) = @_;
-    return if defined(*$obj->{disabled}) && *$obj->{disabled} == $value;
-    $value ?  $obj->format_disabled : $obj->format_enabled;
+    return if ((*$obj->{disabled} && $value) || ((!*$obj->{disabled}) && (!$value)));
     *$obj->{disabled} = $value;
+    $obj->format_color('dis');
 }
 
 sub selected      { *{$_[0]}->{selected}; }
 sub set_selected  {
     my ($obj, $value) = @_;
-    return if defined(*$obj->{selected}) && *$obj->{selected} == $value;
-    $value ?  $obj->format_selected : $obj->format_unselected;
+    return if ((*$obj->{selected} && $value) || ((!*$obj->{selected}) && (!$value)));
     *$obj->{selected} = $value;
+    $obj->format_color('sel');
 }
 
-sub format_selected {
-    if (my $bg_color = $config->color_selected_background) {
-        if (! $config->color_disabled_background) {
-            if (!$_[0]->disabled) {
-                $_[0]->store_color(1,0);
-                $_[0]->set_color($bg_color, undef);
-            } else {
-                $_[0]->set_color($bg_color, undef);
-            }
-        } else {
-            $_[0]->store_color(1,0);
-            $_[0]->set_color($bg_color, undef);
+sub format_color {
+    my ($obj, $type) = @_;
+
+    my $sel = *$obj->{selected};
+    my $dis = *$obj->{disabled};
+
+    if ($sel && $config->color_selected_background) {
+        unless ($dis && $config->color_disabled_background) {
+            $obj->store_bg_color if $type eq 'sel';
         }
+        $obj->set_bg_color($config->color_selected_background);
+    } elsif ($dis && $config->color_disabled_background) {
+        $obj->store_bg_color if $type eq 'dis';
+        $obj->set_bg_color($config->color_disabled_background);
+    } elsif (my $bg = $obj->fetch_bg_color) {
+        $obj->set_bg_color($bg);
     }
 
-    if (my $fg_color = $config->color_selected_foreground) {
-        if ($_[0]->disabled) {
-            if (! $config->color_disabled_foreground) {
-                $_[0]->store_color(0,1);
-                $_[0]->set_color(undef, $fg_color);
-            } else {
-                $_[0]->set_color(undef, $fg_color);
-            }
-        } else {
-            $_[0]->store_color(0,1);
-            $_[0]->set_color(undef, $fg_color);
+    if ($dis && $config->color_disabled_foreground) {
+        unless ($sel && $config->color_selected_foreground) {
+            $obj->store_fg_color if $type eq 'dis';
         }
+        $obj->set_fg_color($config->color_disabled_foreground);
+    } elsif ($sel && $config->color_selected_foreground) {
+        $obj->store_fg_color if $type eq 'sel';
+        $obj->set_fg_color($config->color_selected_foreground);
+    } elsif (my $fg = $obj->fetch_fg_color) {
+        $obj->set_fg_color($fg);
     }
 }
-
-
-sub format_unselected {
-    my $bg_color =
-        ($_[0]->disabled && $config->color_disabled_background) ||
-        $_[0]->stored_color->{bg} ||
-        '';
-    my $fg_color =
-        ($_[0]->disabled && $config->color_disabled_foreground) ||
-        $_[0]->stored_color->{fg} ||
-        '';
-    $_[0]->set_color($bg_color, $fg_color);
-}
-
-sub format_disabled {
-    if ($_[0]->selected) {
-        if (! $config->color_selected_background) {
-            if (my $bg_color = $config->color_disabled_background) {
-                $_[0]->store_color(1,0);
-                $_[0]->set_color($bg_color, undef);
-            }
-        }
-        if (! $config->color_selected_foreground) {
-            if (my $fg_color = $config->color_disabled_foreground) {
-                $_[0]->store_color(0,1);
-                $_[0]->set_color(undef, $fg_color);
-            }
-        }
-    } else {
-        if (my $bg_color = $config->color_disabled_background) {
-            $_[0]->store_color(1,0);
-            $_[0]->set_color($bg_color, undef);
-        }
-        if (my $fg_color = $config->color_disabled_foreground) {
-            $_[0]->store_color(0,1);
-            $_[0]->set_color(undef, $fg_color);
-        }
-    } 
-}
-
-sub format_enabled {
-    my $bg_color =
-        ($_[0]->selected && $config->color_selected_background) ||
-        $_[0]->stored_color->{bg} ||
-        '';
-    my $fg_color =
-        ($_[0]->selected && $config->color_selected_foreground) ||
-        $_[0]->stored_color->{fg} ||
-        '';
-    $_[0]->set_color($bg_color, $fg_color);
-};
 
 sub get_by_location {
     my ($pack,$x,$y) = @_;
@@ -1058,6 +1009,8 @@ my $script = "$Bin/$Script"; # Path to this script
 sub new {
     my ($pack) = @_;
 
+    $0 = 'csshX - Launcher';
+
     # Call, just to make sure screen number is sane
     CsshX::Window->screen_bounds;
 
@@ -1131,6 +1084,8 @@ sub new {
     
     die "No host name passed by launcher" unless $config->slavehost;
 
+    $0 = 'csshX - Slave - '.$config->slavehost;
+
     my ($user, $host, $port) = $pack->parse_user_host_port($config->slavehost);
 
     if (my $pid =  fork) {
@@ -1198,6 +1153,8 @@ my $need_redraw = 1;
 
 sub new {
     my ($pack) = @_;
+
+    $0 = 'csshX - Master';
 
     my $sock = $config->sock || die "--sock sockfile is required";
     unlink $sock;
