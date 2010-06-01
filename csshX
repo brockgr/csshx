@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; our $VERSION = qv("0.71");
+use version; our $VERSION = qv("0.72");
 (our $REVISION = '$Rev$') =~ s/\D//g;
 
 my $config; # Global configuration object..
