@@ -32,7 +32,7 @@ my @config_keys = qw(
     color_disabled_foreground color_disabled_background
     color_master_background color_master_foreground
     color_setbounds_background color_setbounds_foreground
-    tile_x tile_y ssh_args no_growl
+    tile_x tile_y ssh_args no_growl hosts remote_command
     config help launchpid login man master
     master_height screen_bounds screen space debug
     slave slavehost slaveid sock version osver
@@ -64,6 +64,7 @@ sub new {
         ping_timeout               => 2,
         ssh                        => 'ssh',
         no_growl                   => 0,
+        hosts                      => [],
         clusters                   => {}
     }, ref($pack) || $pack;
 
@@ -74,18 +75,32 @@ sub new {
 
     # Command line options - must map to config keys
     GetOptions($obj, 
-        "config|c=s@", "login|l=s",    "master",         "slave",
-        "sock=s",      "slavehost=s",  "launchpid=s",    "slaveid=s",
-        "tile_x|x=i",  "tile_y|y=i",   "ping_test|ping", "ping_timeout=i",
-        "screen=i",    "space=i",      "ssh_args=s",     "debug:+",
-        "session_max=i", "help|h",     "man|m",          "version|v",
-        "ssh=s",
+        'config|c=s@', 'login|l=s',    'master',         'slave',
+        'sock=s',      'slavehost=s',  'launchpid=s',    'slaveid=s',
+        'tile_x|x=i',  'tile_y|y=i',   'ping_test|ping', 'ping_timeout=i',
+        'screen=i',    'space=i',      'ssh_args=s',     'debug:+',
+        'session_max=i', 'help|h',     'man|m',          'version|v',
+        'ssh=s',       'hosts=s@',     'remote_command=s',
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
+
+    $obj->load_hosts($_)  foreach @{$obj->{hosts}};
     $obj->load_csshrc($_) foreach @{$obj->{config}};
 
     return $obj;
+}
+
+sub load_hosts {
+    my ($obj, $host_file) = @_;
+    open(my $fh, '<', $host_file) || die "Can't read [$host_file]: $!";
+
+    while (defined(my $line = <$fh>)) {
+        $line =~ s/#.*$//;
+        my ($name, $command) = ($line =~ m/(\S+)\s+(.*)/g);
+        next unless $name;
+        push @ARGV, CsshX::Host->new($name, $command);
+    }
 }
 
 sub load_clusters {
@@ -205,7 +220,7 @@ sub expand_hostrange {
     }
 }
 
-sub hosts {
+sub all_hosts {
     my ($obj) = @_;
 
     my (@hosts, $ping, $ping_map);
@@ -229,8 +244,10 @@ sub hosts {
 
             print "Host: $arg\n" if $config->debug;
 
+            $arg = CsshX::Host->new($arg) unless ref $arg;
+
             if ($ping) {
-                my ($user, $host, $port) = CsshX::Process->parse_user_host_port($arg);
+                my ($user, $host, $port) = CsshX::Process->parse_user_host_port($arg->name);
                 $port ||= getservbyname('ssh', 'tcp') || 22;
 
                 # We cannot identify 'ack's by port, so we have one ping object for each
@@ -312,6 +329,20 @@ sub set {
 
 sub pod { shift; pod2usage(@_) }
     
+
+#==============================================================================#
+
+package CsshX::Host;
+
+sub new {
+    my ($pkg, $name, $command) = @_;
+    bless my $obj = { name => $name }, ref($pkg) || $pkg;
+    $obj->{command} = $command if defined $command;
+    return $obj;
+}
+
+sub name    { return $_[0]->{name}; }
+sub command { return $_[0]->{command}; }
 
 #==============================================================================#
 
@@ -454,7 +485,7 @@ sub open_window {
     my ($pack, @args) = @_;
 
     # Quote the command arguements
-    my $cmd = join ' ', map { s/(["'])/\$1/g; "'$_'" } @args;
+    my $cmd = join ' ', map { s/(["'])/\\$1/g; "'$_'" } @args;
 
     # don't exec if debugging so we can see errors
     $cmd = "clear && exec $cmd" unless $config->debug;
@@ -1013,7 +1044,7 @@ sub new {
     # Call, just to make sure screen number is sane
     CsshX::Window->screen_bounds;
 
-    my @hosts  = $config->hosts;
+    my @hosts  = $config->all_hosts;
     my $sock   = $config->sock || tmpnam();
     my $login  = $config->login || '';
     my @config = @{$config->config};
@@ -1041,11 +1072,13 @@ sub new {
 
     my $slave_id = 0;
     foreach my $host (@hosts) {
+        my $slavehost = $host->name;
+        my $rem_command = $host->command || $config->remote_command || '';
         $slave_id++;
         my $slave = CsshX::Window::Slave->open_window(
-            $script, '--slave', '--sock', $sock, '--slavehost', $host,
-            '--ssh', $config->ssh,
-            '--ssh_args', $config->ssh_args, '--debug', $config->debug,
+            $script, '--slave', '--sock', $sock, '--slavehost', $slavehost,
+            '--debug', $config->debug, '--ssh', $config->ssh,
+            '--ssh_args', $config->ssh_args, '--remote_command', $rem_command,
             '--slaveid', $slave_id, $login  ? ( '--login',    $login  ) :(),
             (map { ('--config', $_) } @config),
         ) or next;
@@ -1111,6 +1144,7 @@ sub new {
             $port ? ('-p', $port) : (),
             $host
         );
+        push @cmd, $config->remote_command if length $config->remote_command;
         
         print join(" ", @cmd)."\n" if $config->debug;
         exec(@cmd) || die $!;
@@ -1992,6 +2026,20 @@ Set's a list of arguements to pass to the B<ssh> binary when run. If there are
 more than one, they must be quoted or escaped to prevent B<csshX> from 
 interpreting them.
 
+=item B<--remote_command> I<command to run>
+
+Sets the command to run on the remote system after authenticating. If the
+command contains spaces, it should be quoted or escaped.
+
+To run different commands on different hosts, see the B<--hosts> option.
+
+=item B<--hosts> I<hosts_file>
+
+Load a file containg a list of hostnames to connect to and, optionally,
+commands to run on each host. 
+
+See L<HOSTS> for the file format.
+
 =item B<--session_max> I<number>
 
 Set the maximum number of SSH Terminal sessions that can be opened during a
@@ -2296,6 +2344,24 @@ The format is:
 
 Hash '#' can be use for comments.
 
+=head2 HOSTS
+
+There is no defualt hosts file. It may be specified on the command line using
+B<--hosts> or the B<hosts> setting in any B<csshrc> file.
+
+The format is:
+
+    hostname  command to run
+    hostname2 other command to run
+
+The "command to run" is optional. Hostnames may contain user name, ports or
+ranges of names (see L<HOSTNAME RANGES>).
+
+Multiple B<hosts> files may be used at once.
+
+Hash '#' can be use for comments.
+
+
 =head2 CSSHRC
 
 Thee default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files 
@@ -2411,6 +2477,17 @@ See --ssh in L<OPTIONS>
 
 Arguements to be passed when B<ssh> is run.
 See --ssh_args in L<OPTIONS>
+
+=item B<remote_command>
+
+Command to run on remoted machines.
+See --remote_command in L<OPTIONS>
+
+=item B<hosts>
+
+A file containing hosts and optionally commands to be connected to
+The B<hosts> line may be repeated to read multiple files.
+See --hosts in L<OPTIONS> and L<HOSTS>
 
 =item B<session_max>
 
