@@ -416,6 +416,7 @@ sub terminate {
 package CsshX::Window;
 
 use Foundation;
+use List::Util qw(min max);
 use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
@@ -572,7 +573,7 @@ sub screen_bounds {
 sub physical_screen_bounds { 
     my ($scr) = @_;
 
-    $scr ||= 0;
+    $scr ||= 1;
     $scr =~ /^(\d+)(?:-(\d+))?$/ || die "Screen must be a number (e.g. 1) or a range (e.g. 1-2)";
     my ($s1, $s2) = ($1,$2);
 
@@ -580,7 +581,7 @@ sub physical_screen_bounds {
     die "No such screen [$s1], screen must be $displays or less"
         if $s1 > $displays;
 
-    my $frame1 = NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
+    my $frame1 = NSScreen->screens->objectAtIndex_($scr-1)->visibleFrame;
     my $scr1   = [ObjCStruct::NSRect->unpack($frame1)];
 
     if (defined $s2) {
@@ -590,7 +591,7 @@ sub physical_screen_bounds {
         die "No such screen [$s2], screen must be $displays or less"
             if $s2 > $displays;
     
-        my $frame2 = NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
+        my $frame2 = NSScreen->screens->objectAtIndex_($scr-1)->visibleFrame;
         my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
 
         my $out  = [];       
@@ -2053,6 +2054,8 @@ monitors. If the arguement is passed a number, that screen will be used.
 If a range (of the fromat B<1-2>) is passed, a rectangle that fits within
 those displays will be chosen. Particularly odd arrangements of windows,
 such as "L" shapes will probably not work.
+
+Screens are numbered from 1.
 
 =item B<--space> I<number>
 
