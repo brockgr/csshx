@@ -1007,6 +1007,7 @@ sub grid {
             $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
             $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
             $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
             $window->winobj->setMiniaturized_(0);
             $window->winobj->setFrontmost_(1);
         };
