@@ -588,7 +588,7 @@ sub physical_screen_bounds {
         # fits neatly across the screens
 
         die "No such screen [$s2], screen must be $displays or less"
-            if i$s2 > $displays;
+            if $s2 > $displays;
     
         my $frame2 = NSScreen->screens->objectAtIndex_($scr)->visibleFrame;
         my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
