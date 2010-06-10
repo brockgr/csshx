@@ -577,11 +577,11 @@ sub physical_screen_bounds {
     $scr =~ /^(\d+)(?:-(\d+))?$/ || die "Screen must be a number (e.g. 1) or a range (e.g. 1-2)";
     my ($s1, $s2) = ($1,$2);
 
-    my $displays =  NSScreen->screens()->count - 1;
+    my $displays =  NSScreen->screens()->count;
     die "No such screen [$s1], screen must be $displays or less"
         if $s1 > $displays;
 
-    my $frame1 = NSScreen->screens->objectAtIndex_($scr-1)->visibleFrame;
+    my $frame1 = NSScreen->screens->objectAtIndex_($s1-1)->visibleFrame;
     my $scr1   = [ObjCStruct::NSRect->unpack($frame1)];
 
     if (defined $s2) {
@@ -591,7 +591,7 @@ sub physical_screen_bounds {
         die "No such screen [$s2], screen must be $displays or less"
             if $s2 > $displays;
     
-        my $frame2 = NSScreen->screens->objectAtIndex_($scr-1)->visibleFrame;
+        my $frame2 = NSScreen->screens->objectAtIndex_($s2-1)->visibleFrame;
         my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
 
         my $out  = [];       
