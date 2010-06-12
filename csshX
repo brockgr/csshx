@@ -1004,12 +1004,13 @@ sub grid {
 
         eval {
             $window->winobj->setVisible_(0);
-            $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
-            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
-            $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
-            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
             $window->winobj->setMiniaturized_(0);
+            $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
+            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
             $window->winobj->setFrontmost_(1);
+            # Set the origin again - since it only work when the window
+            # is frontmost. Doing it in two steps is less flickery.
+            $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
         };
 
         *$window->{zoomed} = 0;
