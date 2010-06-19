@@ -1964,7 +1964,7 @@ die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
 # Workaround for boolean ObjCBridge bug in early 10.6!! rdar://problem/7886872
 # For calls that return bools (which we don't actully use) generate
 # NSAppleScript calls that look like the ScriptingBridge ones.
-if ($config->osver gt qv(10.6.0)) {
+if ($config->osver ge qv(10.6.0)) {
     no warnings qw(once);
     *make_shim = sub {
         my $key = shift; return sub {
