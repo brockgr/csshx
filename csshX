@@ -21,7 +21,6 @@ my $config; # Global configuration object..
 
 package CsshX::Config;
 
-use Pod::Usage;
 use Getopt::Long;
 use Socket;
 use POSIX qw(uname);
@@ -41,7 +40,7 @@ my @config_keys = qw(
 
 sub new {
     my ($pack) = @_;
-    
+
     # Default config settings
     bless my $obj = {
         color_disabled_background  => '',
@@ -68,7 +67,7 @@ sub new {
         clusters                   => {}
     }, ref($pack) || $pack;
 
-    ($obj->{osver} = (uname)[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
+    ($obj->{osver} = (uname())[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
     
     $obj->load_clusters("/etc/clusters");
     $obj->load_csshrc($_) foreach ("/etc/csshrc", "$ENV{HOME}/.csshrc");
@@ -80,7 +79,7 @@ sub new {
         'tile_x|x=i',  'tile_y|y=i',   'ping_test|ping', 'ping_timeout=i',
         'screen=s',    'space=i',      'ssh_args=s',     'debug:+',
         'session_max=i', 'help|h',     'man|m',          'version|v',
-        'ssh=s',       'hosts=s@',     'remote_command=s',
+        'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
@@ -185,7 +184,7 @@ sub parse_netmask {
     }
 
     my $start = unpack('N', $pack_host);
-    my $end = unpack('N', INADDR_BROADCAST ^ $pack_mask | $pack_host);
+    my $end = unpack('N', &INADDR_BROADCAST ^ $pack_mask | $pack_host);
 
     my @ips;
     for (my $n=$start; $n<=$end; $n++) {
@@ -290,7 +289,7 @@ sub all_hosts {
         push @hosts, process_pings($ping,$ping_map);
     }
 
-    pod2usage(-msg => "$0: Need at least one hostname or clustername\n")
+    $obj->pod(-msg => "$0: Need at least one hostname or clustername\n")
         unless @hosts;
 
     return @hosts;
@@ -327,7 +326,11 @@ sub set {
     $obj->{$prop} = $val;
 }
 
-sub pod { shift; pod2usage(@_) }
+sub pod {
+    shift;
+    eval "use Pod::Usage"; die $@ if $@;
+    pod2usage(@_)
+}
     
 
 #==============================================================================#
@@ -415,8 +418,6 @@ sub terminate {
 
 package CsshX::Window;
 
-use Foundation;
-use List::Util qw(min max);
 use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
@@ -424,14 +425,20 @@ use base qw(IO::Handle);
     qw(PerlObjCBridge);
 
 
-NSBundle->bundleWithPath_(
-    '/System/Library/Frameworks/ScriptingBridge.framework' # Loads AppKit too
-)->load;
+my $terminal;
+sub init {
+    eval "use Foundation; use List::Util qw(min max) "; die $@ if $@;
 
-my $terminal = SBApplication->applicationWithBundleIdentifier_(
-    "com.apple.terminal"
-);
+    NSBundle->bundleWithPath_(
+        '/System/Library/Frameworks/ScriptingBridge.framework' # Loads AppKit too
+    )->load;
+    
+    $terminal = SBApplication->applicationWithBundleIdentifier_(
+        "com.apple.terminal"
+    );
 
+    Growl->init;
+}
 
 my ($cur_bounds, $max_bounds);
 
@@ -803,6 +810,7 @@ use POSIX qw(ceil);
 my $slaveids_by_location = [];
 my $current_selection = [0,0];
 
+
 sub location      { @{*{$_[0]}->{location}}; }
 sub set_location  {
     my ($obj, $x, $y) = @_;
@@ -1086,13 +1094,16 @@ sub parse_user_host_port {
 package CsshX::Launcher;
 
 use base    qw(CsshX::Socket::Selectable);
-use FindBin qw($Bin $Script);
 use POSIX   qw(tmpnam);
-
-my $script = "$Bin/$Script"; # Path to this script
+use FindBin qw($Bin $Script);;
 
 sub new {
     my ($pack) = @_;
+
+    # Load modules
+    CsshX::Window->init;
+
+    my $script = "$Bin/$Script";
 
     # Call, just to make sure screen number is sane
     CsshX::Window->screen_bounds;
@@ -1160,12 +1171,13 @@ package CsshX::Slave;
 use base qw(CsshX::Socket::Selectable);
 use base qw(CsshX::Window::Slave);
 use base qw(CsshX::Process);
-use Text::ParseWords qw(shellwords);
 
 my $TIOCSTI = 0x80017472; # 10.5/10.6
 
 sub new {
     my ($pack) = @_;
+
+    eval "use Text::ParseWords qw(shellwords)"; die $@ if $@;
     
     die "No host name passed by launcher" unless $config->slavehost;
 
@@ -1222,7 +1234,6 @@ sub set_port { *{$_[0]}->{port} = $_[1]; }
 sub set_host { *{$_[0]}->{host} = $_[1]; }
 
 sub terminate {
-    Growl->notify("Close", "Closed ".$config->slavehost);
     $_[0]->SUPER::terminate;
 }
 
@@ -1239,6 +1250,8 @@ my $need_redraw = 1;
 
 sub new {
     my ($pack) = @_;
+
+    CsshX::Window->init;
 
     $0 = 'csshX - Master';
 
@@ -1654,7 +1667,7 @@ my $modes = {
                     my @config = @{$config->config};
                     my $slave = $obj->master->register_slave($slaveid, $hostname, undef, undef);
                     $slave->open_window(
-                        $script, '--slave', '--sock', $sock, 
+                        __FILE__, '--slave', '--sock', $sock, 
                         '--slavehost', $hostname, '--slaveid', $slaveid,
                         '--ssh', $config->ssh,
                         '--ssh_args', $config->ssh_args, '--debug', $config->debug,
@@ -1766,6 +1779,7 @@ sub send_input {
 
 sub terminate {
     my ($obj) = @_;
+    Growl->notify("Close", "Closed ".$obj->hostname);
     delete $slaves_by_slaveid->{$obj->slaveid};
     $obj->SUPER::terminate();
 }
@@ -1867,6 +1881,7 @@ package Growl;
 
 my ($nc,$ns_dict);
 sub init {
+
     return if $config->no_growl;
 
     $ns_dict = Foundation::objectRefFromPerlRef({
@@ -1964,6 +1979,7 @@ die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
 # Workaround for boolean ObjCBridge bug in early 10.6!! rdar://problem/7886872
 # For calls that return bools (which we don't actully use) generate
 # NSAppleScript calls that look like the ScriptingBridge ones.
+# Expected to be fixed in the "next major release" of OS-X (i.e 10.7)
 if ($config->osver ge qv(10.6.0)) {
     no warnings qw(once);
     *make_shim = sub {
@@ -1981,9 +1997,7 @@ if ($config->osver ge qv(10.6.0)) {
     *NSObject::setFrontmost_    = make_shim('frontmost');
 }
 
-Growl->init;
-
-eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }'
+eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }; $PerlObjCBridge::Trace=1'
     if $config->debug;
 
 if    ($config->help)    { $config->pod(-verbose => 1)                        }
