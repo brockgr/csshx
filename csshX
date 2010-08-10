@@ -1292,7 +1292,9 @@ sub new {
 
     while ((!defined $obj->windowid) || $obj->slave_count || $obj->launcher) {
         $obj->redraw if $need_redraw;
-        $obj->title("Master - ".$obj->slave_count." connections");
+        $obj->title("Master - ".join ", ", grep { defined } 
+            map { $_->hostname } CsshX::Master::Socket::Slave->slaves);
+        #$obj->title("Master - ".$obj->slave_count." connections");
         $obj->handle_io();
     }
     unlink $sock;
