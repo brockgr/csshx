@@ -27,6 +27,7 @@ use POSIX qw(uname);
 
 # All possible config keys
 my @config_keys = qw(
+    action_key
     color_selected_foreground color_selected_background
     color_disabled_foreground color_disabled_background
     color_master_background color_master_foreground
@@ -43,6 +44,7 @@ sub new {
 
     # Default config settings
     bless my $obj = {
+        action_key                 => "\001", # Ctrl-A
         color_disabled_background  => '',
         color_disabled_foreground  => '{37779,37779,37779}',
         color_selected_background  => '{17990,35209,53456}',
@@ -1387,10 +1389,11 @@ my $modes = {
         onchange => sub { system '/bin/stty', 'raw' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
+            my $ctrl = $config->action_key;
             $buffer =~ s/\033\[([ABCD])/\033O$1/gs; # Convert CSI to SS3 cursor codes
             #print join(' ', map { unpack("H2", $_) } split //, $buffer)."\r\n";
         
-            if ($buffer =~ s/^(.*?)\001//) {
+            if ($buffer =~ s/^(.*?)$ctrl//) {
                 $obj->master->send_terminal_input($1);
                 $obj->set_mode_and_parse('action', $buffer);
             } else {
@@ -1404,7 +1407,7 @@ my $modes = {
         prompt => sub { 
             my @slaves = CsshX::Master::Socket::Slave->slaves;
             my @enabled = grep { (! $_->disabled) && $_ } @slaves;
-            "Actions (Esc to exit, Ctrl-a / a to send Ctrl-a to input)\r\n".
+            "Actions (Esc to exit, Ctrl-a to send Ctrl-a to input)\r\n".
             "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
@@ -1412,12 +1415,13 @@ my $modes = {
         },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
+            my $ctrl = $config->action_key;
         
             while (length $buffer) {
                 if ($buffer =~ s/^\e//) {
                     return $obj->set_mode_and_parse('input', $buffer);
-                } elsif ($buffer =~ s/^[a\001]//) {
-                    $obj->master->send_terminal_input("\001");
+                } elsif ($buffer =~ s/^($ctrl)//) {
+                    $obj->master->send_terminal_input($1);
                     return $obj->set_mode_and_parse('input', $buffer);
                 } elsif ($buffer =~ s/^r//) {
                     $obj->master->arrange_windows;
@@ -2237,6 +2241,9 @@ The master window allows additional windows to be opened, control of input
 to be selected and re-tiling. These are all accessed using B<Ctrl-a> key
 combination.
 
+(Ctrl-a can be changed to another code using the L<action_key> setting in your
+csshrc)
+
 Use B<Esc> to return to input mode.
 
 =over 4
@@ -2249,7 +2256,7 @@ cancels hostname input.
 This does not accept cluster names, ranges or subnets. This might be added in 
 the future.
 
-=item B<Ctrl-a Ctrl-a> or B<Ctrl-a a>
+=item B<Ctrl-a Ctrl-a> 
 
 Sends a Control a (\001) character to all enabled terminals.
 
@@ -2612,6 +2619,17 @@ See --ping_test in L<OPTIONS>
 
 The timeout, in seconds, for the ping test.
 See --ping_timeout in L<OPTIONS>
+
+=item B<action_key>
+
+Change the enable the key code that triggers the master menu.
+Default is \001 (Ctrl-A). To change it to Ctrl-z for example,
+add the following line to your B<.csshrc>
+
+    action_key = \032
+
+The basic rule is the number is octal value of the position 
+of the letter in the alphabet. Z => 26 decimal => 32 octal.
 
 =item B<no_growl>
 
