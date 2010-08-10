@@ -35,7 +35,7 @@ my @config_keys = qw(
     config help launchpid login man master
     master_height screen_bounds screen space debug
     slave slavehost slaveid sock version osver
-    session_max ping_test ping_timeout ssh
+    session_max ping_test ping_timeout ssh interleave
 );
 
 sub new {
@@ -63,6 +63,7 @@ sub new {
         ping_timeout               => 2,
         ssh                        => 'ssh',
         no_growl                   => 0,
+        interleave                 => 0,
         hosts                      => [],
         clusters                   => {}
     }, ref($pack) || $pack;
@@ -80,6 +81,7 @@ sub new {
         'screen=s',    'space=i',      'ssh_args=s',     'debug:+',
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
+        'interleave|i=i',
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
@@ -1134,6 +1136,20 @@ sub new {
     }
     die "No master" unless $ready;
 
+    if ($config->interleave > 1) {
+        my $wrap = 0;
+        my $cur = 0;
+        my @new_hosts;
+        foreach (@hosts) {
+            push @new_hosts, $hosts[$cur];
+            $cur += $config->interleave;
+            if ($cur > $#hosts) {
+                $cur = ++$wrap;
+            }
+        }
+        @hosts = @new_hosts;
+    }
+
     my $slave_id = 0;
     foreach my $host (@hosts) {
         my $slavehost = $host->name;
@@ -1592,7 +1608,7 @@ my $modes = {
     },
     'enable' => {
         prompt => sub { "Select window with Arrow keys of h,j,k,l: (Esc to exit)\r\n".
-        "[e]nable input, [d]isable input, disable [o]thers, diable [O]thers and zoom, [t]oggle intput" },
+        "[e]nable input, [d]isable input, disable [o]thers, disable [O]thers and zoom, [t]oggle input" },
         onchange => sub { CsshX::Window::Slave->selection_on; },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -2036,7 +2052,7 @@ input in the master will be sent to all the I<slave> windows.
 To specify the username for each host, the hostname can be prepended by 
 I<user@>. Similarly, appending I<:port> will set the port to ssh to.
 
-You can also use hostsname ranges, to specify many hosts.
+You can also use hostname ranges, to specify many hosts.
 
 =head1 OPTIONS
 
@@ -2086,16 +2102,16 @@ Default: I<0>  (Main window)
 =item B<-y>, B<--tile_y> I<number>
 
 (csshX only) The number of rows to use when tiling windows.
-B<tile_x> will be use if both are specified.
+B<tile_x> will be used if both are specified.
 
 =item B<--ssh> I<ssh command>
 
-Change the command that is run. May useful if you use an alternative ssh binary
+Change the command that is run. May be useful if you use an alternative ssh binary
 or some wrapper script to connect to hosts.
 
 =item B<--ssh_args> I<ssh arguements>
 
-Set's a list of arguements to pass to the B<ssh> binary when run. If there are
+Sets a list of arguements to pass to the B<ssh> binary when run. If there are
 more than one, they must be quoted or escaped to prevent B<csshX> from 
 interpreting them.
 
@@ -2124,7 +2140,7 @@ terminal windows.
 
 =item B<--ping_test>, B<--ping> I<number>
 
-To avoid opeining connections to machines that are down, or not running ssh, 
+To avoid opening connections to machines that are down, or not running ssh, 
 this option will make csshX ping each host/port that is specified. This uses 
 the Net::Ping module to perform a simple syn/ack check.
 
@@ -2147,6 +2163,24 @@ Sets the unix domain socket filename to be used for interprocess communication.
 This may be set by the user in the launcher session, possibly for security
 reasons.
 
+=item B<-i>, B<--interleave> I<number>
+
+(csshX only) Interleave the hosts that were passed in.
+Useful when multiple clusters are specified.
+
+For instance, if clusterA and clusterB each have 3 hosts, running 
+   csshX -tile_x 2 -interleave 3 clusterA clusterB
+
+will display as
+   clusterA1 clusterB1
+   clusterA2 clusterB2
+   clusterA3 clusterB3
+   
+as opposed to the default
+   clusterA1 clusterA2
+   clusterA3 clusterB1
+   clusterB2 clusterB3
+
 =item B<--debug> I<number>
 
 Sets the debug level. Number is optional and will default to 1 if ommitted.
@@ -2159,9 +2193,9 @@ see any errors).
 
 =head1 HOSTNAME RANGES
 
-If you have a lot of similarly named hosts, or which to open all hosts in
-a subnet, hostname ranges will simplify things. Howerver this also allows
-to open crazy numbers of windows. To save you from yourself, B<session_max>
+If you have a lot of similarly named hosts, or wish to open all hosts in
+a subnet, hostname ranges will simplify things. Howerver this also allows opening
+a crazy numbers of windows. To save you from yourself, B<session_max>
 will limit the number of hosts opened.
 
 It is also recomended to enable B<ping_test> if only a few machines on a 
@@ -2415,11 +2449,11 @@ The format is:
     cluster1 host1 host2
     cluster2 host3 host4
 
-Hash '#' can be use for comments.
+Hash '#' can be used for comments.
 
 =head2 HOSTS
 
-There is no defualt hosts file. It may be specified on the command line using
+There is no default hosts file. It may be specified on the command line using
 B<--hosts> or the B<hosts> setting in any B<csshrc> file.
 
 The format is:
@@ -2432,12 +2466,12 @@ ranges of names (see L<HOSTNAME RANGES>).
 
 Multiple B<hosts> files may be used at once.
 
-Hash '#' can be use for comments.
+Hash '#' can be used for comments.
 
 
 =head2 CSSHRC
 
-Thee default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files 
+The default csshrc files are B</etc/csshrc>, B<~/.csshrc>. Additional files 
 can be specified with the B<--config> option on the command line.
 
 Hash '#' can be used at any point in the file for comments.
@@ -2521,7 +2555,7 @@ Default: I<0> (auto-tile)
 =item B<tile_y>
 
 (csshX only) The number of rows to use when tiling windows.
-B<tile_x> will be use if both are specified.
+B<tile_x> will be used if both are specified.
 Default: I<0> (auto-tile)
 
 =item B<screen_bounds>
