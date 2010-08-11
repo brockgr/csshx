@@ -44,7 +44,7 @@ sub new {
 
     # Default config settings
     bless my $obj = {
-        action_key                 => "\001", # Ctrl-A
+        action_key                 => '\\001', # Ctrl-A
         color_disabled_background  => '',
         color_disabled_foreground  => '{37779,37779,37779}',
         color_selected_background  => '{17990,35209,53456}',
@@ -1385,7 +1385,11 @@ my $kk = "\e[0m";      # Reset
 
 my $modes = {
     'input' => {
-        prompt =>  sub { "Input to terminal: (Ctrl-a to enter control mode)\r\n" },
+        prompt =>  sub {
+            my ($obj, $buffer) = @_;
+            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+96)/e;
+            "Input to terminal: ($ctrl_str to enter control mode)\r\n"
+        },
         onchange => sub { system '/bin/stty', 'raw' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1405,9 +1409,10 @@ my $modes = {
     },
     'action' => {
         prompt => sub { 
+            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+96)/e;
             my @slaves = CsshX::Master::Socket::Slave->slaves;
             my @enabled = grep { (! $_->disabled) && $_ } @slaves;
-            "Actions (Esc to exit, Ctrl-a to send Ctrl-a to input)\r\n".
+            "Actions (Esc to exit, $ctrl_str to send $ctrl_str to input)\r\n".
             "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
