@@ -704,21 +704,24 @@ sub run_ruby {
 
 sub set_space {
     my ($obj, $space) = @_;
+    my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
     $obj->run_ruby("
         require 'dl'
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-        con = dl.sym('_CGSDefaultConnection', 'I').call()
-        dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], [Integer(ARGV[0])], 1, Integer(ARGV[1]))
+        con = dl.sym('_CGSDefaultConnection', '${I}').call()
+        dl.sym('CGSMoveWorkspaceWindowList', '${I}${I}A${I}${I}').call(con[0], [Integer(ARGV[0])], 1, Integer(ARGV[1]))
     ", $obj->windowid, $space);
 }
 
 sub space {
     my ($obj) = @_;
+    my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
+    my $i = lc $I;
     $obj->run_ruby("
         require 'dl'
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-        con = dl.sym('_CGSDefaultConnection', 'I').call()
-        r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], Integer(ARGV[0]), 0)
+        con = dl.sym('_CGSDefaultConnection', '${I}').call()
+        r,rs = dl.sym('CGSGetWindowWorkspace', '${I}${I}${I}${i}').call(con[0], Integer(ARGV[0]), 0)
         exit rs[2]
     ", $obj->windowid);
 }
@@ -1387,7 +1390,7 @@ my $modes = {
     'input' => {
         prompt =>  sub {
             my ($obj, $buffer) = @_;
-            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+96)/e;
+            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+64)/e;
             "Input to terminal: ($ctrl_str to enter control mode)\r\n"
         },
         onchange => sub { system '/bin/stty', 'raw' },
@@ -1409,7 +1412,7 @@ my $modes = {
     },
     'action' => {
         prompt => sub { 
-            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+96)/e;
+            (my $ctrl_str = $config->action_key) =~ s/^\\([0-7]{3})$/"Ctrl-".pack("c",oct($1)+64)/e;
             my @slaves = CsshX::Master::Socket::Slave->slaves;
             my @enabled = grep { (! $_->disabled) && $_ } @slaves;
             "Actions (Esc to exit, $ctrl_str to send $ctrl_str to input)\r\n".
