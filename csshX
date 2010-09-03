@@ -37,6 +37,7 @@ my @config_keys = qw(
     master_height screen_bounds screen space debug
     slave slavehost slaveid sock version osver
     session_max ping_test ping_timeout ssh interleave
+    sorthosts
 );
 
 sub new {
@@ -83,7 +84,7 @@ sub new {
         'screen=s',    'space=i',      'ssh_args=s',     'debug:+',
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
-        'interleave|i=i',
+        'interleave|i=i', 'sorthosts'
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
@@ -1141,6 +1142,10 @@ sub new {
     }
     die "No master" unless $ready;
 
+    if ($config->sorthosts) {
+        @hosts = sort { $a->name cmp $b->name } @hosts;
+    }
+
     if ($config->interleave > 1) {
         my $wrap = 0;
         my $cur = 0;
@@ -2176,6 +2181,10 @@ The value is in seconds. (default: 2)
 Sets the unix domain socket filename to be used for interprocess communication.
 This may be set by the user in the launcher session, possibly for security
 reasons.
+
+=item B<--sorthosts>
+
+Sort the host windows, by hostname, before opening them.
 
 =item B<-i>, B<--interleave> I<number>
 
