@@ -97,7 +97,10 @@ sub new {
 
 sub load_hosts {
     my ($obj, $host_file) = @_;
-    open(my $fh, '<', $host_file) || die "Can't read [$host_file]: $!";
+    
+    open (my $fh,  
+        $host_file eq "-" ? "<&STDIN" : "< $host_file"
+    )  || die "Can't read [$host_file]: $!";
 
     while (defined(my $line = <$fh>)) {
         $line =~ s/#.*$//;
@@ -2144,7 +2147,8 @@ To run different commands on different hosts, see the B<--hosts> option.
 =item B<--hosts> I<hosts_file>
 
 Load a file containg a list of hostnames to connect to and, optionally,
-commands to run on each host. 
+commands to run on each host. A single dash B<-> can be used to read 
+hosts data from standard input, for example, through a pipe.
 
 See L<HOSTS> for the file format.
 
