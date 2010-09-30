@@ -37,6 +37,7 @@ my @config_keys = qw(
     master_height screen_bounds screen space debug
     slave slavehost slaveid sock version osver
     session_max ping_test ping_timeout ssh interleave
+    master_settings_set slave_settings_set
     sorthosts
 );
 
@@ -84,6 +85,7 @@ sub new {
         'screen=s',    'space=i',      'ssh_args=s',     'debug:+',
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
+        'master_settings_set|mss=s',   'slave_settings_set|sss=s',
         'interleave|i=i', 'sorthosts'
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
@@ -446,6 +448,7 @@ sub init {
     );
 
     Growl->init;
+
 }
 
 my ($cur_bounds, $max_bounds);
@@ -568,6 +571,18 @@ sub fetch_fg_color {
     return *$obj->{'stored_fg_color'} || '';
 }
 
+sub set_settings_set {
+    my ($obj,$want) = @_;
+    my $sets = $terminal->settingsSets;
+    for (my $i=0; $i<$sets->count; $i++) {
+        my $set = $sets->objectAtIndex_($i);
+        if ($set->name->UTF8String eq $want) {
+            $obj->tabobj->setCurrentSettings_($set);
+            return 1;
+        }
+    }
+    return;
+}
 
 sub screen_bounds { 
     my ($obj) = @_;
@@ -1137,6 +1152,9 @@ sub new {
     ) or die "Master window failed to open";
     $greeting .= $master->uid."\n";
     $master->set_space($config->space) if $config->space;
+    $master->set_settings_set($config->master_settings_set)
+        if $config->master_settings_set;
+
 
     # Wait for master to be ready
     for (1..20) {
@@ -1177,6 +1195,8 @@ sub new {
         ) or next;
         $greeting .= "$slave_id ".$slave->uid."\n";
         $slave->set_space($config->space) if $config->space;
+        $slave->set_settings_set($config->slave_settings_set)
+            if $config->slave_settings_set;
     }
     $greeting .= "done\n";
 
@@ -1713,6 +1733,9 @@ my $modes = {
                         (map { ('--config', $_) } @config),
                     ) or return;
 
+                    $slave->set_settings_set($config->slave_settings_set)
+                        if $config->slave_settings_set;
+
                     $obj->master->arrange_windows;
                 }
                 return $obj->set_mode_and_parse('input', $buffer);
@@ -2190,6 +2213,15 @@ reasons.
 
 Sort the host windows, by hostname, before opening them.
 
+=item B<--slave_settings_set>, B<--sss> I<string>
+
+Change the "settings set" for slave windows. See L<slave_settings_set> below
+for an explanation of why you might do this.
+
+=item B<--master_settings_set>, B<--mss> I<string>
+
+Change the "settings set" for master windows.
+
 =item B<-i>, B<--interleave> I<number>
 
 (csshX only) Interleave the hosts that were passed in.
@@ -2576,6 +2608,23 @@ Default: I<{17990,35209,53456}> (Mid-blue)
 
 (csshX only) The foreground for a selected window in window selection mode.
 Default: Nothing
+
+=item B<slave_settings_set>
+
+(csshX only) Apply a terminal "settings set" to the slave window. Defaults to
+your default "settings set", and will then apply the color settings above.
+
+This may be handy if you are annoyed by the beeping terminal "bell" (which
+can be a little wierd if you hear it from many terminals at once). In Terminal.app
+preferences, you can clone you default settings and maybe replace Advanced ->
+Audible bell with Visual bell. Then, if you set B<slave_settings_set> to the 
+name of the cloned "settings set" you should have silent csshX slaves.
+
+=item B<master_settings_set>
+
+(csshX only) Apply a terminal "settings set" to the master window. Defaults to
+your default "settings set", and will then apply the color settings above.
+
 
 =item B<tile_x>
 
