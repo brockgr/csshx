@@ -138,7 +138,7 @@ sub load_csshrc {
         if (my ($key, $value) = ($line =~ m/^\s*(\S+)\s*=\s*(.*?)\s*$/)) {
             if ($key eq 'extra_cluster_file') {
                 $obj->load_clusters($_) foreach (
-                    map { s/(~|\$HOME)/$ENV{HOME}/g} split /\s*,\s*/, $value
+                    map { s/(~|\$HOME)/$ENV{HOME}/g;$_} split /\s*,\s*/, $value
                 );
             } elsif ($key eq 'screen_bounds') {
                 my $bounds = $obj->parse_bounds($value);
