@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #==============================================================================#
-# csshX -- Cluster SSH tool for MacOS-X Termial.app                            #
+# csshX -- Cluster SSH tool for Mac OS X Terminal.app                          #
 #==============================================================================#
 # Copyright 2010 by Gavin Brock <gbrock@cpan.org>                              #
 #                                                                              #
@@ -1042,7 +1042,7 @@ sub grid {
             $window->winobj->setSize_(ObjCStruct::NSSize->new($width,$height));
             $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
             $window->winobj->setFrontmost_(1);
-            # Set the origin again - since it only work when the window
+            # Set the origin again - since it only works when the window
             # is frontmost. Doing it in two steps is less flickery.
             $window->winobj->setOrigin_(ObjCStruct::NSPoint->new($x,$y));
         };
@@ -1649,7 +1649,7 @@ my $modes = {
         },
     },
     'enable' => {
-        prompt => sub { "Select window with Arrow keys of h,j,k,l: (Esc to exit)\r\n".
+        prompt => sub { "Select window with Arrow keys or h,j,k,l: (Esc to exit)\r\n".
         "[e]nable input, [d]isable input, disable [o]thers, disable [O]thers and zoom, [t]oggle input" },
         onchange => sub { CsshX::Window::Slave->selection_on; },
         parse_buffer => sub {
@@ -2076,7 +2076,7 @@ __END__
 
 =head1 NAME
 
-csshX - Cluster SSH tool using MacOS-X Terminal.app
+csshX - Cluster SSH tool using Mac OS X Terminal.app
 
 =head1 SYNOPSIS
 
@@ -2088,9 +2088,9 @@ csshX [B<-h> | B<-m> | B<-v> ]
 
 =head1 DESCRIPTION
 
-B<csshX> is a tool to allow simultaneous control of multiple SSH sessions. 
+B<csshX> is a tool to allow simultaneous control of multiple ssh sessions. 
 I<host1>, I<host2>, etc. are either remote hostnames or remote cluster names.
-B<csshX> will attempt to create an SSH session to each remote host in separate
+B<csshX> will attempt to create an ssh session to each remote host in separate
 Terminal.app windows. A I<master> window will also be created. All keyboard 
 input in the master will be sent to all the I<slave> windows.
 
@@ -2126,9 +2126,9 @@ Displays the version of csshX
 =item B<--screen> I<number or range>
 
 Sets the screen(s) on which to display the terminals, if you have multiple 
-monitors. If the arguement is passed a number, that screen will be used.
+monitors. If the argument is passed a number, that screen will be used.
 
-If a range (of the fromat B<1-2>) is passed, a rectangle that fits within
+If a range (of the format B<1-2>) is passed, a rectangle that fits within
 those displays will be chosen. Particularly odd arrangements of windows,
 such as "L" shapes will probably not work.
 
@@ -2136,9 +2136,9 @@ Screens are numbered from 1.
 
 =item B<--space> I<number>
 
-Sets the space (if spaces are enabled) on which to display the terminals.
+Sets the space (if Spaces is enabled) on which to display the terminals.
 
-Default: I<0>  (Main window)
+Default: I<0>  (current space)
 
 =item B<-x>, B<--tile_x> I<number>
 
@@ -2154,9 +2154,9 @@ B<tile_x> will be used if both are specified.
 Change the command that is run. May be useful if you use an alternative ssh binary
 or some wrapper script to connect to hosts.
 
-=item B<--ssh_args> I<ssh arguements>
+=item B<--ssh_args> I<ssh arguments>
 
-Sets a list of arguements to pass to the B<ssh> binary when run. If there are
+Sets a list of arguments to pass to the B<ssh> binary when run. If there is
 more than one, they must be quoted or escaped to prevent B<csshX> from 
 interpreting them.
 
@@ -2169,7 +2169,7 @@ To run different commands on different hosts, see the B<--hosts> option.
 
 =item B<--hosts> I<hosts_file>
 
-Load a file containg a list of hostnames to connect to and, optionally,
+Load a file containing a list of hostnames to connect to and, optionally,
 commands to run on each host. A single dash B<-> can be used to read 
 hosts data from standard input, for example, through a pipe.
 
@@ -2177,20 +2177,20 @@ See L<HOSTS> for the file format.
 
 =item B<--session_max> I<number>
 
-Set the maximum number of SSH Terminal sessions that can be opened during a
-single csshX session. By default csshX will not open more than 256 sesions.
+Set the maximum number of ssh Terminal sessions that can be opened during a
+single csshX session. By default csshX will not open more than 256 sessions.
 You must set this to something really high to get around that. (default: 256)
 
-Note that you will probably run out of Pseudo-TTY's before reaching 256
+Note that you will probably run out of Pseudo-TTYs before reaching 256
 terminal windows.
 
 =item B<--ping_test>, B<--ping> I<number>
 
-To avoid opening connections to machines that are down, or not running ssh, 
+To avoid opening connections to machines that are down, or not running sshd, 
 this option will make csshX ping each host/port that is specified. This uses 
 the Net::Ping module to perform a simple syn/ack check.
 
-Use of this option is highly recomended when subnet ranges are used.
+Use of this option is highly recommended when subnet ranges are used.
 
 =item B<--ping_timeout> I<number>
 
@@ -2205,7 +2205,7 @@ The value is in seconds. (default: 2)
 
 =item B<--sock> I<sockfile>
 
-Sets the unix domain socket filename to be used for interprocess communication.
+Sets the Unix domain socket filename to be used for interprocess communication.
 This may be set by the user in the launcher session, possibly for security
 reasons.
 
@@ -2242,7 +2242,7 @@ as opposed to the default
 
 =item B<--debug> I<number>
 
-Sets the debug level. Number is optional and will default to 1 if ommitted.
+Sets the debug level. Number is optional and will default to 1 if omitted.
 
 Currently only one level of debug is supported. It will enable backtrace on
 fatal errors, and will keep terminal windows open after terminating (so you can
@@ -2253,11 +2253,11 @@ see any errors).
 =head1 HOSTNAME RANGES
 
 If you have a lot of similarly named hosts, or wish to open all hosts in
-a subnet, hostname ranges will simplify things. Howerver this also allows opening
-a crazy numbers of windows. To save you from yourself, B<session_max>
+a subnet, hostname ranges will simplify things. However this also allows opening
+a crazy number of windows. To save you from yourself, B<session_max>
 will limit the number of hosts opened.
 
-It is also recomended to enable B<ping_test> if only a few machines on a 
+It is also recommended to enable B<ping_test> if only a few machines on a 
 subnet are actually available.
 
 =over 4
@@ -2269,7 +2269,7 @@ You can specify subnets using two syntaxes:
     192.168.1.0/28
     192.168.1.0/255.255.255.240
 
-This will also work with a hostname, assuming it resolves to a valid IP
+This will also work with a hostname, assuming it resolves to a valid IP.
 
 If the IP address is not the network address, only that IP and IPs above 
 that address will be used (e.g. 192.168.0.14/28 will only use 2 IP addresses).
@@ -2291,7 +2291,7 @@ Some examples:
 =head1 WINDOW CONTROL
 
 The master window allows additional windows to be opened, control of input
-to be selected and re-tiling. These are all accessed using B<Ctrl-a> key
+to be selected, and re-tiling. These are all accessed using B<Ctrl-a> key
 combination.
 
 (Ctrl-a can be changed to another code using the L<action_key> setting in your
@@ -2349,7 +2349,7 @@ Toggle the enabled status of all windows.
 
 =item B<Ctrl-a n>  
 
-Renable all windows for input.
+Re-enable all windows for input.
 
 =item B<Ctrl-a space>  
 
@@ -2358,14 +2358,14 @@ terminal is enabled - see below)
 
 =item B<Ctrl-a e>  
 
-Enter window selection mode. In window slection mode the following keys are
+Enter window selection mode. In window selection mode the following keys are
 available:
 
 =back
 
 =over 8
 
-=item B<Arrow keys> B<h>,B<j>,B<k>,B<l>
+=item B<Arrow keys>, B<h>,B<j>,B<k>,B<l>
 
 Change window selection.
 
@@ -2388,7 +2388,7 @@ Disable all windows except for selected.
 =item B<O>  
 
 Zoom selected window and disable all other windows. Use B<Ctrl-a r> to 
-unzooom (and retile) the window.
+unzoom (and retile) the window.
 
 =item B<Esc>  
 
@@ -2429,7 +2429,7 @@ Reset to default screen (or configuration file) bounds.
 
 =item B<f>
 
-Set to bounds to fill screen.
+Set bounds to fill screen.
 
 =item B<p>
 
@@ -2498,7 +2498,7 @@ on the command line. (ping_test'ed hosts will not be in any order)
 =head1 CONFIGURATION FILES
 
 B<csshX> accepts Cluster-SSH B<clusters> and B<csshrc> style configurations.
-Not all Cluster-SSH attributes are supported, and a few attribute have
+Not all Cluster-SSH attributes are supported, and a few attributes have
 been added.
 
 =head2 CLUSTERS
@@ -2538,11 +2538,11 @@ can be specified with the B<--config> option on the command line.
 
 Hash '#' can be used at any point in the file for comments.
 
-Color specifcations can be in two formats. Applescript format consists of
-three integer values in the form B<{ nnnnn,nnnnn,nnnnn }>, where nnnnn's are
-red, green and blue decimal values between 0 and 65535. Web style 
-B<HHHHHH> style where HH's are red, green and blue hex values between
-00 and FF (note the leading # is not used to avoid confusion with comments).
+Color specifications can be in two formats. Applescript format consists of
+three integer values in the form B<{nnnnn,nnnnn,nnnnn}>, where nnnnn's are
+red, green and blue decimal values between 0 and 65535. Web style is B<HHHHHH>
+where HH's are red, green and blue hex values between 00 and FF (note the
+leading # is not used to avoid confusion with comments).
 
 
 =over 4
@@ -2567,23 +2567,23 @@ An additional B<clusters> configuration file to include.
 
 =item B<color_master_background>
 
-(csshX only) The applescript color identifier for the background of the
-master window. Default: I<{38036,0,0}> (dark red)
+(csshX only) The color for the background of the master window. Default:
+I<{38036,0,0}> (dark red)
 
 =item B<color_master_foreground>
 
-(csshX only) The applescript color identifier for the foreground font of the
-master window. Default: I<{65535,65535,65535}> (white)
+(csshX only) The color for the foreground font of the master window. Default:
+I<{65535,65535,65535}> (white)
 
 =item B<color_setbounds_background>
 
-(csshX only) The applescript color identifier for the background color in
-bounds setting mode. Default I<{17990,35209,53456}> (Mid-blue)
+(csshX only) The background color in bounds setting mode. Default:
+I<{17990,35209,53456}> (mid-blue)
 
 =item B<color_setbounds_foreground>
 
-(csshX only) The applescript color identifier for the foreground font in
-bounds setting mode. Default: Nothing
+(csshX only) The color of the foreground font in bounds setting mode.
+Default: Nothing
 
 =item B<master_height>
 
@@ -2592,17 +2592,17 @@ bounds setting mode. Default: Nothing
 =item B<color_disabled_background>
 
 (csshX) The background color for a disabled window.
-Defualt: Nothing
+Default: Nothing
 
 =item B<color_disabled_foreground>
 
 (csshX only) The foreground font color for a disabled window.
-Default: I<{37779,37779,37779}> (Mid-grey)
+Default: I<{37779,37779,37779}> (mid-gray)
 
 =item B<color_selected_background>
 
 (csshX only) The background for a selected window in window selection mode.
-Default: I<{17990,35209,53456}> (Mid-blue)
+Default: I<{17990,35209,53456}> (mid-blue)
 
 =item B<color_selected_foreground>
 
@@ -2615,8 +2615,8 @@ Default: Nothing
 your default "settings set", and will then apply the color settings above.
 
 This may be handy if you are annoyed by the beeping terminal "bell" (which
-can be a little wierd if you hear it from many terminals at once). In Terminal.app
-preferences, you can clone you default settings and maybe replace Advanced ->
+can be a little weird if you hear it from many terminals at once). In Terminal.app
+preferences, you can clone your default settings and maybe replace Advanced ->
 Audible bell with Visual bell. Then, if you set B<slave_settings_set> to the 
 name of the cloned "settings set" you should have silent csshX slaves.
 
@@ -2646,12 +2646,12 @@ terminal windows. Default is the actual screen size. Format is:
 
 =item B<screen>
 
-(csshX only) The screen number which to draw the terminal windows.
+(csshX only) The screen number on which to draw the terminal windows.
 See --screen in L<OPTIONS>
 
 =item B<space>
 
-(csshX only) The space in which to draw the terminal windows.
+(csshX only) The Space in which to draw the terminal windows.
 See --space in L<OPTIONS>
 
 =item B<ssh>
@@ -2661,7 +2661,7 @@ See --ssh in L<OPTIONS>
 
 =item B<ssh_args>
 
-Arguements to be passed when B<ssh> is run.
+Arguments to be passed when B<ssh> is run.
 See --ssh_args in L<OPTIONS>
 
 =item B<remote_command>
@@ -2671,13 +2671,13 @@ See --remote_command in L<OPTIONS>
 
 =item B<hosts>
 
-A file containing hosts and optionally commands to be connected to
+A file containing hosts to be connected to, and optionally commands
 The B<hosts> line may be repeated to read multiple files.
 See --hosts in L<OPTIONS> and L<HOSTS>
 
 =item B<session_max>
 
-Maxmimum sessions to open.
+Maximum sessions to open.
 See --session_max in L<OPTIONS>
 
 =item B<ping_test>
@@ -2692,14 +2692,14 @@ See --ping_timeout in L<OPTIONS>
 
 =item B<action_key>
 
-Change the enable the key code that triggers the master menu.
-Default is \001 (Ctrl-A). To change it to Ctrl-z for example,
+Change the enable key code that triggers the master menu.
+Default is \001 (Ctrl-a). To change it to Ctrl-z for example,
 add the following line to your B<.csshrc>
 
     action_key = \032
 
-The basic rule is the number is octal value of the position 
-of the letter in the alphabet. Z => 26 decimal => 32 octal.
+The number is the octal value of the position of the letter in the alphabet.
+z => 26 decimal => 32 octal.
 
 =item B<no_growl>
 
@@ -2714,8 +2714,8 @@ See --debug in L<OPTIONS>
 
 =head1 GROWL SUPPORT
 
-If Growl is installed, certain events will trigger notifications
-if you do not like these you can either disable them using the 
+If Growl is installed, certain events will trigger notifications.
+If you do not like these you can either disable them using the 
 B<no_growl> setting in .csshrc, or fine tune the messages in 
 the Growl Preference pane.
 

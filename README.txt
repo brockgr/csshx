@@ -1,8 +1,8 @@
-            ------------------------------------------------
-            csshX - Cluster SSH tool for MacOS-X Termial.app
-            ------------------------------------------------
-            Copyright 2010 by Gavin Brock  <gbrock@cpan.org>
-            ------------------------------------------------
+            -------------------------------------------------
+            csshX - Cluster SSH tool for Mac OS X Termial.app
+            -------------------------------------------------
+            Copyright 2011 by Gavin Brock   <gbrock@cpan.org>
+            -------------------------------------------------
 
 
 INSTALLATION:
@@ -11,7 +11,7 @@ As csshX is a command line tool, no special installation is needed. It may
 be copied into a directory in your path, (e.g. /usr/local/bin) for your 
 convenience.
 
-The software has been tested on MacOS-X 10.5 and 10.6 with the default Perl
+The software has been tested on Mac OS X 10.5 and 10.6 with the default Perl
 installation - no additional Perl modules are required.
 
 
@@ -51,5 +51,5 @@ Full details can be found by running:
 CREDITS:
 
 Thanks to everyone for the suggestions and bug reports. That's what makes
-coding fun. In additon, I would like to thank the following people for their
-patches: Eric Lubow, mtbeedee, Mitch Silverstein
+coding fun. In addition, I would like to thank the following people for their
+patches: Eric Lubow, mtbeedee, Mitch Silverstein, Robin Stephenson
