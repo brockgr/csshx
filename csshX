@@ -815,13 +815,15 @@ sub bounds_as_size {
 
 sub move_slaves_to_master_space {
     my ($obj) = @_;
+    my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
+    my $i = lc $I;
     $obj->run_ruby("
         require 'dl';
         ARGV.map! {|wid| Integer(wid)}
         dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-        con = dl.sym('_CGSDefaultConnection', 'I').call()
-        r,rs = dl.sym('CGSGetWindowWorkspace', 'IIIi').call(con[0], ARGV.shift, 0)
-        dl.sym('CGSMoveWorkspaceWindowList', 'IIAII').call(con[0], ARGV, ARGV.length, rs[2])
+        con = dl.sym('_CGSDefaultConnection', '${I}').call()
+        r,rs = dl.sym('CGSGetWindowWorkspace', '${I}${I}${I}${i}').call(con[0], ARGV.shift, 0)
+        dl.sym('CGSMoveWorkspaceWindowList', '${I}${I}A${I}${I}').call(con[0], ARGV, ARGV.length, rs[2])
     ", map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
 }
 
