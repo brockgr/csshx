@@ -51,5 +51,5 @@ Full details can be found by running:
 CREDITS:
 
 Thanks to everyone for the suggestions and bug reports. That's what makes
-coding fun. In addition, I would like to thank the following people for their
-patches: Eric Lubow, mtbeedee, Mitch Silverstein, Robin Stephenson
+coding fun. In additon, I would like to thank the following people for their
+patches: Eric Lubow, mtbeedee, Mitch Silverstein, Robin Stephenson, Chris Yunker
