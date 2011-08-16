@@ -722,6 +722,10 @@ sub run_ruby {
 }
 
 sub set_space {
+    use version; if ($config->osver ge qv(10.7.0)) {
+      warn "Currently spaces not supported on 10.7 Lion";
+      return;
+    }
     my ($obj, $space) = @_;
     my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
     $obj->run_ruby("
@@ -2651,6 +2655,8 @@ terminal windows. Default is the actual screen size. Format is:
 See --screen in L<OPTIONS>
 
 =item B<space>
+
+(Currently not supported on 10.7 Lion)
 
 (csshX only) The Space in which to draw the terminal windows.
 See --space in L<OPTIONS>
