@@ -41,6 +41,12 @@ my @config_keys = qw(
     sorthosts
 );
 
+foreach my $prop (@config_keys) {
+    no strict 'refs';
+    *{"CsshX::Config::$prop"} = sub { $_[0]->{$prop} };
+}
+
+
 sub new {
     my ($pack) = @_;
 
@@ -325,12 +331,6 @@ sub process_pings {
     return @hosts;
 }
 
-foreach my $prop (@config_keys) {
-    no strict 'refs';
-    *{"CsshX::Config::$prop"} = sub { $_[0]->{$prop} };
-}
-
-    
 sub set {
     my ($obj, $prop, $val) = @_;
     $obj->{$prop} = $val;
