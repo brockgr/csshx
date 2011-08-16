@@ -2039,11 +2039,10 @@ $config = CsshX::Config->new;
 
 die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
 
-# Workaround for boolean ObjCBridge bug in early 10.6!! rdar://problem/7886872
+# Workaround for boolean ObjCBridge bug in 10.6 (fixed in 10.7)
 # For calls that return bools (which we don't actully use) generate
 # NSAppleScript calls that look like the ScriptingBridge ones.
-# Expected to be fixed in the "next major release" of OS-X (i.e 10.7)
-if ($config->osver ge qv(10.6.0)) {
+if (($config->osver ge qv(10.6.0)) && ($config->osver lt qv(10.7.0))) {
     no warnings qw(once);
     *make_shim = sub {
         my $key = shift; return sub {
@@ -2061,7 +2060,7 @@ if ($config->osver ge qv(10.6.0)) {
 }
 
 eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }; $PerlObjCBridge::Trace=1'
-    if $config->debug;
+    if $config->debug; # Stack trace on death
 
 if    ($config->help)    { $config->pod(-verbose => 1)                        }
 elsif ($config->man)     { $config->pod(-verbose => 2)                        }
