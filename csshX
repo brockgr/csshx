@@ -218,6 +218,12 @@ sub expand_hostrange {
     # 192.168.0.[0-20,13]
     # 192.168.[0-2].[255,254]
     # 192.168.[0-2].0/24
+    # 192.168.0.1+3
+
+    if ($pat =~ /^(.*)\+(\d+)$/) {
+      my $to_repeat = $1;
+      return [ map { expand_hostrange($to_repeat) || $to_repeat } (1..$2) ];
+    }
 
     my ($user, $host, $port) = CsshX::Process->parse_user_host_port($pat);
     $user = $user ? "$user\@" : '';
@@ -2290,6 +2296,17 @@ Some examples:
     192.168.0.[5-20]
     host-[prod,dev][a-f]
     192.168.[0,2-3].[1-2,3-5]
+
+=item B<Repeating>
+
+You can repeat a hostname by using '+' sign and a number.
+
+For example:
+
+    localhost+4
+
+This will open for connections to localhost.
+
 
 =back
 
