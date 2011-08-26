@@ -2305,7 +2305,7 @@ For example:
 
     localhost+4
 
-This will open for connections to localhost.
+This will open four connections to localhost.
 
 
 =back
