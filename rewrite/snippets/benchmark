@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+my $count = 5000;
+
+package ObjCStruct;
+
+my %heap; # Used to maintain references to temp perl data structures
+
+sub Pointer  () { 'L!' }
+sub CGFloat  () { 'f'  }
+sub CGFloatS () { length(pack CGFloat,'0') }
+
+sub unpack {
+    my ($obj, $struct) = @_;
+    my $int_ptr = ref($obj) ? $$obj : $$struct;
+    my $pac_ptr = pack($obj->Pointer, $int_ptr);
+    my $mem = unpack($obj->_ptr_pack_str, $pac_ptr);
+    return unpack($obj->_mem_pack_str, $mem);
+}
+
+sub new {
+    my ($pack, @vals) = @_;
+    my $mem = pack($pack->_mem_pack_str, @vals);
+    my $pac_ptr = pack($pack->_ptr_pack_str, $mem);
+    my $int_ptr = CORE::unpack($pack->Pointer, $pac_ptr);
+    $heap{$int_ptr} = $mem;
+    bless my $obj = \$int_ptr, ref($pack) || $pack;
+    return $obj;
+}
+    
+sub DESTROY { delete $heap{${$_[0]}} }
+
+
+package ObjCStruct::NSPoint;
+# typedef struct _NSPoint { CGFloat x; CGFloat y; } NSPoint;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'2' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+
+package ObjCStruct::NSSize;
+# typedef struct _NSSize { CGFloat width; CGFloat height; } NSSize;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'2' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*2 }
+
+package ObjCStruct::NSRect;
+# typedef struct _NSRect { NSPoint origin; NSSize size; } NSRect;
+use base qw(ObjCStruct);
+sub _mem_pack_str { $_[0]->CGFloat.'4' }
+sub _ptr_pack_str { 'P'.$_[0]->CGFloatS*4 }
+
+
+package main;
+
+use Foundation;
+use Benchmark qw(:all);
+
+@SBApplication::ISA = qw(PerlObjCBridge);
+
+NSBundle->bundleWithPath_('/System/Library/Frameworks/ScriptingBridge.framework')->load;
+
+my $terminal = SBApplication->applicationWithBundleIdentifier_("com.apple.terminal");
+
+
+my $as = NSAppleScript->alloc->initWithSource_('tell application "Terminal" to get do script "exec sleep 1000"');
+my $tab_ev_desc = $as->executeAndReturnError_(undef);
+my $tab_id      = $tab_ev_desc->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String;
+my $win_ev_desc = $tab_ev_desc->descriptorForKeyword_(unpack('N','from'));
+my $window_id   = $win_ev_desc->descriptorForKeyword_(unpack('N','seld'))->stringValue->UTF8String;
+
+timethese($count, {
+    'ASGet' => \&as_get,
+    'SBGet' => \&sb_get,
+});
+
+
+
+sub as_get {
+    my $as = NSAppleScript->alloc->initWithSource_('tell application "Terminal" to get size of window id '.$window_id);
+    my $size_ev_desc = $as->executeAndReturnError_(undef);
+    my $x = $size_ev_desc->descriptorAtIndex_(1)->int32Value;
+    my $y = $size_ev_desc->descriptorAtIndex_(2)->int32Value;
+    $as->release;
+    return ($x,$y);
+}
+
+sub sb_get {
+    my ($x, $y) = ObjCStruct::NSPoint->unpack($terminal->windows->objectWithID_($window_id)->origin);
+    return ($x,$y);
+}
+
+

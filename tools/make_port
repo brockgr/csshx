@@ -1,0 +1,85 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use IPC::Open2;
+use LWP::Simple qw(get);
+
+my $version = $ARGV[0] || die "Usage: $0 verion_number";
+
+my $data = get "http://csshx.googlecode.com/files/csshX-$version.tgz" || die "get failed";
+my $port = join '', <DATA>;
+
+$port =~ s/#VERSION#/$version/g;
+
+my ($in, $out);
+open2($out, $in, 'openssl dgst -md5');
+print $in $data; close($in);
+chomp(my $md5 = <$out>);
+print "MD5: $md5\n";
+$port =~ s/#MD5#/$md5/g;
+
+open2($out, $in, 'openssl dgst -sha1');
+print $in $data; close($in);
+chomp(my $sha1 = <$out>);
+print "SHA1: $sha1\n";
+$port =~ s/#SHA1#/$sha1/g;
+
+open2($out, $in, 'openssl dgst -ripemd160');
+print $in $data; close($in);
+chomp(my $rmd160 = <$out>);
+print "RMD160: $rmd160\n";
+$port =~ s/#RMD160#/$rmd160/g;
+
+
+chdir('macport') || die;
+open($out, ">", "Portfile") || die $!;
+print $out $port;
+close($out);
+
+print "\n";
+
+my $patch_file = "csshX-$version.patch";
+system("svn diff Portfile | tail +3 > $patch_file");
+print "Patch waiting in: macport/$patch_file\n";
+
+__DATA__
+# $Id: Portfile 52953 2009-06-26 08:18:52Z blb@macports.org $
+
+PortSystem          1.0
+name                csshX
+version             #VERSION#
+categories          net sysutils security
+maintainers         nomaintainer
+supported_archs     noarch
+description         Cluster ssh tool for Terminal.app
+long_description \
+   csshX is a tool to allow simultaneous control of multiple SSH sessions. \
+   csshX will attempt to create an SSH session to each remote host in \
+   separate Terminal.app windows. A master window will also be created. All \
+   keyboard input in the master will be sent to all the slave windows.
+
+platforms           darwin
+
+homepage            http://code.google.com/p/csshx/
+master_sites        googlecode
+extract.suffix      .tgz
+
+checksums           md5     #MD5# \
+                    sha1    #SHA1# \
+                    rmd160  #RMD160#
+
+# Note this does not depend on MacPorts' perl but the system one for
+# things like Foundation.pm...
+
+use_configure       no
+
+build               {}
+
+destroot {
+   xinstall -m 755 -W ${worksrcpath} csshX ${destroot}${prefix}/bin
+   system "/usr/bin/pod2man ${worksrcpath}/csshX \
+      ${destroot}${prefix}/share/man/man1/csshX.1"
+}
+

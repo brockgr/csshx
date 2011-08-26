@@ -1,0 +1,12 @@
+#!/bin/sh
+
+echo \#summary Description of usage and short-cut keys > wiki/Manual.wiki
+pod2wiki --style GoogleCode trunk/csshX >> wiki/Manual.wiki
+echo ---- >> wiki/Manual.wiki
+echo >> wiki/Manual.wiki
+echo '* Auto-generated from svn trunk/csshX: *' >> wiki/Manual.wiki
+echo >> wiki/Manual.wiki
+echo {{{ >> wiki/Manual.wiki
+svn info trunk/csshX | egrep 'Last Changed' >> wiki/Manual.wiki
+echo }}} >> wiki/Manual.wiki
+echo >> wiki/Manual.wiki
