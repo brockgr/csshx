@@ -17,6 +17,7 @@ use version; our $VERSION = qv("0.73");
 
 my $config; # Global configuration object..
 
+
 #==============================================================================#
 
 package CsshX::Config;
