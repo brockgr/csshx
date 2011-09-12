@@ -2,17 +2,17 @@
 
 use strict;
 use warnings;
-use FindBin qw($Bin);
 use File::Temp qw(tempdir);
 
 
-my $tag = $ARGV[0] || "trunk";
+chomp(my $cd = `git rev-parse --show-cdup`);
+chdir($cd) || die $!;
 
 my $tmpdir = tempdir(CLEANUP => 1);
 
-my $version = `$Bin/$tag/csshX -v 2>&1` || die "Cauld not get version from csshX";
+my $version = `./csshX -v 2>&1` || die "Cauld not get version from csshX";
 
-if ($version =~ /csshX v([\d.]+)-(\d+)/) {
+if ($version =~ /csshX\s+([\d.]+)-(\d+)-\w+/) {
     $version = $1;
 } else {
     die "Can't parse: $version";
@@ -22,17 +22,17 @@ print "Creating [csshX-$version.tgz]\n";
 
 mkdir "$tmpdir/csshX-$version" || die "mkdir: $!";
 
-open(MANIFEST, "< $Bin/$tag/MANIFEST") || die "Can't read MANIFEST: $!";
+open(MANIFEST, "< MANIFEST") || die "Can't read MANIFEST: $!";
 while(defined(my $file = <MANIFEST>)) {
     chomp($file);
-    system("cp", "$tag/$file", "$tmpdir/csshX-$version/") && die "copy $file: $!";
+    system("cp", "$file", "$tmpdir/csshX-$version/") && die "copy $file: $!";
 }
 close(MANIFEST);
 
 chdir $tmpdir || die "chdir: $!";
 system("tar", "cvfz", "$tmpdir/csshX-$version.tgz", "csshX-$version") && die "tar: $!";
 
-system("$Bin/support/googlecode_upload.py", "--summary", "csshX v$version", "--labels", "OpSys-OSX,Type-Archive", "--project", "csshx", "$tmpdir/csshX-$version.tgz")
+system("./tools/googlecode_upload.py", "--summary", "csshX v$version", "--labels", "OpSys-OSX,Type-Archive", "--project", "csshx", "$tmpdir/csshX-$version.tgz")
    && die "Upload returned: $?";
 
 print "Done.\n";
