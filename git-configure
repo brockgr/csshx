@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Put the version number into the commmit. This is mostly so people
+# who download the bleeding edge version can report which version
+# they are using.
+
+git config filter.revnum.smudge 'perl -pe "s/\\\$Rev[^\\\$]*\\\$/\\\$Rev: `git describe`\\\$/"'
+#git config filter.revnum.clean 'perl -pe "s/\\\$Rev[^\\\$]*\\\$/\\\$Rev\\\$/"'
+git config filter.revnum.clean cat
+
+# Note for Tagging:
+#    git tag -a -m "Version 0.73" 0.73 HEAD
+
