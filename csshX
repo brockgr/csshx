@@ -12,8 +12,7 @@
 use strict;
 use warnings;
 
-use version; our $VERSION = qv("0.73");
-(our $REVISION = '$Rev$') =~ s/\D//g;
+use version; (our $VERSION = '$Rev$') =~ s/\$Rev:(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -2079,7 +2078,7 @@ eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }; $PerlO
 
 if    ($config->help)    { $config->pod(-verbose => 1)                        }
 elsif ($config->man)     { $config->pod(-verbose => 2)                        }
-elsif ($config->version) { die sprintf "csshX $VERSION-$REVISION\n", $VERSION }
+elsif ($config->version) { die sprintf "csshX $VERSION\n", $VERSION           }
 elsif ($config->master)  { CsshX::Master->new()                               }
 elsif ($config->slave)   { CsshX::Slave->new()                                }
 else                     { CsshX::Launcher->new()                             }
