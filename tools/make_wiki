@@ -1,12 +1,14 @@
 #!/bin/sh
 
+cd ./`git rev-parse --show-cdup`
 echo \#summary Description of usage and short-cut keys > wiki/Manual.wiki
-pod2wiki --style GoogleCode trunk/csshX >> wiki/Manual.wiki
+pod2wiki --style GoogleCode csshX >> wiki/Manual.wiki
 echo ---- >> wiki/Manual.wiki
 echo >> wiki/Manual.wiki
-echo '* Auto-generated from svn trunk/csshX: *' >> wiki/Manual.wiki
+echo '* Auto-generated from git csshX: *' >> wiki/Manual.wiki
 echo >> wiki/Manual.wiki
 echo {{{ >> wiki/Manual.wiki
-svn info trunk/csshX | egrep 'Last Changed' >> wiki/Manual.wiki
+./csshX -v >> wiki/Manual.wiki 2>&1
+git --no-pager log --max-count=1 | grep Date >> wiki/Manual.wiki
 echo }}} >> wiki/Manual.wiki
 echo >> wiki/Manual.wiki

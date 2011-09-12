@@ -7,7 +7,7 @@ use File::Temp qw(tempdir);
 
 
 chomp(my $cd = `git rev-parse --show-cdup`);
-chdir($cd) || die $!;
+chdir("./$cd") || die $!;
 
 my $tmpdir = tempdir(CLEANUP => 1);
 
