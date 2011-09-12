@@ -2,6 +2,7 @@
 
 use strict;
 use warnings;
+use FindBin qw($Bin);
 use File::Temp qw(tempdir);
 
 
@@ -12,7 +13,7 @@ my $tmpdir = tempdir(CLEANUP => 1);
 
 my $version = `./csshX -v 2>&1` || die "Cauld not get version from csshX";
 
-if ($version =~ /csshX\s+([\d.]+)-(\d+)-\w+/) {
+if ($version =~ /csshX\s+([\d.]+)(-\d+-\w+)?/) {
     $version = $1;
 } else {
     die "Can't parse: $version";
@@ -32,7 +33,7 @@ close(MANIFEST);
 chdir $tmpdir || die "chdir: $!";
 system("tar", "cvfz", "$tmpdir/csshX-$version.tgz", "csshX-$version") && die "tar: $!";
 
-system("./tools/googlecode_upload.py", "--summary", "csshX v$version", "--labels", "OpSys-OSX,Type-Archive", "--project", "csshx", "$tmpdir/csshX-$version.tgz")
+system("$Bin/googlecode_upload.py", "--summary", "csshX v$version", "--labels", "OpSys-OSX,Type-Archive", "--project", "csshx", "$tmpdir/csshX-$version.tgz")
    && die "Upload returned: $?";
 
 print "Done.\n";

@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.73-16-gd10eb0d$') =~ s/\$Rev:(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74$') =~ s/\$Rev:(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
