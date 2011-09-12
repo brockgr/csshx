@@ -1,0 +1,16 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+chomp(my $desc = `git describe`) || die $!;
+
+foreach (`git diff --cached --name-status`) {
+  my ($mod,$file) = split /\s+/;
+  if ($mod =~ /[MA]/) {
+    system("/usr/bin/perl","-pi", "-e",'s/\$Rev:[^\$\[\']*\$/\$Rev: '.$desc.'\$/', $file) && die $!;
+  }
+}
+exit 0;
+
+#s/\\\$Rev: 0.74-1-gbbb0531$]*\\\$/\\\$Rev: `git describe`\$/"

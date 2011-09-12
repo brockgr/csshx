@@ -4,9 +4,12 @@
 # who download the bleeding edge version can report which version
 # they are using.
 
-git config filter.revnum.clean 'perl -pe "s/\\\$Rev[^\\\$]*\\\$/\\\$Rev: `git describe`\\\$/"'
-#git config filter.revnum.clean 'perl -pe "s/\\\$Rev[^\\\$]*\\\$/\\\$Rev\\\$/"'
-git config filter.revnum.smudge cat
+
+cd `git rev-parse --show-cdup`/.git/hooks
+ln -s ../../tools/pre-commit .
+
+#git config filter.revnum.clean 'perl -pe "s/\\\$Rev: 0.74-1-gbbb0531$]*\\\$/\\\$Rev: `git describe`\\\$/"'
+#git config filter.revnum.clean 'perl -pe "s/\\\$Rev: 0.74-1-gbbb0531$]*\\\$/\\\$Rev\\\$/"'
 
 # Note for Tagging:
 #    git tag -a -m "Version 0.73" 0.73 HEAD
