@@ -728,10 +728,6 @@ sub run_ruby {
 }
 
 sub set_space {
-    use version; if ($config->osver ge qv(10.7.0)) {
-      warn "Currently spaces not supported on 10.7 Lion";
-      return;
-    }
     my ($obj, $space) = @_;
     my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
     $obj->run_ruby("
@@ -1163,7 +1159,15 @@ sub new {
         (map { ('--config', $_) } @config),
     ) or die "Master window failed to open";
     $greeting .= $master->uid."\n";
-    $master->set_space($config->space) if $config->space;
+
+    if ($config->space) {
+        use version; if ($config->osver ge qv(10.7.0)) {
+            warn "Currently space number not supported on 10.7 Lion\n";
+        } else {
+            $master->set_space($config->space);
+        }
+    }
+
     $master->set_settings_set($config->master_settings_set)
         if $config->master_settings_set;
 
@@ -1395,6 +1399,7 @@ sub redraw {
 
 sub arrange_windows {
     my ($obj) = @_;
+    $obj->move_slaves_to_master_space();
     CsshX::Window::Slave->grid($obj, grep {$_->windowid} $obj->slaves);
     $obj->format_master();
 }
@@ -1572,7 +1577,6 @@ my $modes = {
                     $obj->master->move(0,1);
                 } elsif ($buffer =~ s/^\r//) {
                     $obj->master->bounds_as_size;
-                    $obj->master->move_slaves_to_master_space();
                     $obj->master->format_master;
                     $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
