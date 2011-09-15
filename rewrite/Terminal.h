@@ -1,6 +1,5 @@
 /*
  * Terminal.h
- * Created using: sdef /Applications/Utilities/Terminal.app | sdp -fh --basename Terminal
  */
 
 #import <AppKit/AppKit.h>
@@ -9,16 +8,18 @@
 
 @class TerminalApplication, TerminalWindow, TerminalSettingsSet, TerminalTab;
 
-typedef enum {
+enum TerminalSaveOptions {
 	TerminalSaveOptionsYes = 'yes ' /* Save the file. */,
 	TerminalSaveOptionsNo = 'no  ' /* Do not save the file. */,
 	TerminalSaveOptionsAsk = 'ask ' /* Ask the user whether or not to save the file. */
-} TerminalSaveOptions;
+};
+typedef enum TerminalSaveOptions TerminalSaveOptions;
 
-typedef enum {
+enum TerminalPrintingErrorHandling {
 	TerminalPrintingErrorHandlingStandard = 'lwst' /* Standard PostScript error handling */,
 	TerminalPrintingErrorHandlingDetailed = 'lwdt' /* print a detailed report of PostScript errors */
-} TerminalPrintingErrorHandling;
+};
+typedef enum TerminalPrintingErrorHandling TerminalPrintingErrorHandling;
 
 
 
@@ -59,6 +60,7 @@ typedef enum {
 @property (readonly) BOOL zoomable;  // Whether the window can be zoomed.
 @property BOOL zoomed;  // Whether the window is currently zoomed.
 @property BOOL frontmost;  // Whether the window is currently the frontmost Terminal window.
+@property (copy) TerminalTab *selectedTab;
 @property NSPoint position;  // The position of the window, relative to the upper left corner of the screen.
 @property NSPoint origin;  // The position of the window, relative to the lower left corner of the screen.
 @property NSPoint size;  // The width and height of the window
