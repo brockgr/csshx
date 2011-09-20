@@ -763,8 +763,8 @@ sub wait_for_no_mod_keys {
 sub font_shrink {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
-    $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
     $sysevents->keystroke_using_('-', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
@@ -773,8 +773,8 @@ sub font_shrink {
 sub font_grow {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
-    $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
     $sysevents->keystroke_using_('+', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
@@ -782,8 +782,8 @@ sub font_grow {
 sub clear_scrollback {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
-    $obj->winobj->setFrontmost_(2);
     wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(2);
     $sysevents->keystroke_using_('k', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
