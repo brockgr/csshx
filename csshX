@@ -756,19 +756,26 @@ sub space {
 sub font_shrink {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
+    $obj->winobj->setFrontmost_(1);
     $sysevents->keystroke_using_('-', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
 }
 
+# This is failing due to "shift" being pressed :-(
 sub font_grow {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
+    $obj->winobj->setFrontmost_(1);
     $sysevents->keystroke_using_('+', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
 }
 
 sub clear_scrollback {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
+    $obj->winobj->setFrontmost_(2);
     $sysevents->keystroke_using_('k', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
 }
 
 
@@ -1485,7 +1492,7 @@ my $modes = {
             "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
-            "[g/G]rid, [f/F]ont size, clear s[k]rollback,  e[x]it\r\n";
+            "[g/G]rid, [f/F]ont size, clear s[k]rollback, [d]ump scrollback to file  e[x]it\r\n";
         },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1799,7 +1806,7 @@ my $modes = {
         },
     },
     'dumpscrollback' => {
-        prompt => sub { 'File base name: ' },
+        prompt => sub { 'File base name (will be relative to your home folder) [Desktop/csshx_scrollback]: ' },
         onchange => sub { system '/bin/stty', 'sane' },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1807,15 +1814,26 @@ my $modes = {
                 return $obj->set_mode_and_parse('input', $buffer);
             } elsif ($buffer =~ s/^(.*?)\r?\n//) {
                 my $filename = $1;
-                $filename = "csshx_buffer" unless length $filename;
+                $filename = "Desktop/csshx_scrollback" unless length $filename;
 
-                print "Writing to [$filename]\n" if $config->debug;
-                open(my $out, ">", $filename) || warn $!;
+                my %seen;
                 foreach my $window (CsshX::Master::Socket::Slave->slaves) {
-                    print $out $window->tabobj->history;
-                }
-                close($out);
+                    # Keep only good file name chars - this is not exhaustive
+                    (my $extension = $window->hostname) =~ s/[^-@.+()=\w]+/_/g;
 
+                    # Create a unique extension if we have many hosts with the same name
+                    if ($seen{$extension}) {
+                        my $n = 1;
+                        $n++ while $seen{"$extension.$n"};
+                        $extension = "$extension.$n";
+                    }
+
+                    $seen{$extension} = 1;
+                    print "Writing to [$filename.$extension.txt]\n" if $config->debug;
+                    open(my $out, ">", "$filename.$extension.txt") || warn $!;
+                    print $out $window->tabobj->history->UTF8String;
+                    close($out);
+                }
 
                 return $obj->set_mode_and_parse('input', $buffer);
             }
@@ -2429,7 +2447,7 @@ Clear the scroll-back in all slave terminals (by sending Command-k to each one)
 =item B<Ctrl-a d>
 
 Dump the terminal scrollback histories to files. You will be promted for
-a base filename (defaults to csshx_buffer). A unique terminal name will
+a base filename (defaults to ~/Desktop/csshx_scrollback). A unique terminal name will
 be appended to this base.
 
 =item B<Ctrl-a m>  
