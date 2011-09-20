@@ -437,6 +437,7 @@ use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
 @NSWorkspace::ISA = @SBApplication::ISA = @NSScreen::ISA = @NSColor::ISA =
+@NSEvent::ISA =
     qw(PerlObjCBridge);
 
 
@@ -753,10 +754,17 @@ sub space {
     ", $obj->windowid);
 }
 
+
+# Cheeesy test to block until no modifier keys are pressed
+sub wait_for_no_mod_keys {
+    1 while NSEvent->modifierFlags != 0
+}
+
 sub font_shrink {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
     $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
     $sysevents->keystroke_using_('-', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
@@ -766,6 +774,7 @@ sub font_grow {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
     $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
     $sysevents->keystroke_using_('+', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
@@ -774,6 +783,7 @@ sub clear_scrollback {
     my ($obj) = @_;
     $obj->winobj->setFrontmost_(1);
     $obj->winobj->setFrontmost_(2);
+    wait_for_no_mod_keys();
     $sysevents->keystroke_using_('k', OSType('Kcmd'));
     $obj->winobj->setFrontmost_(1);
 }
@@ -2438,7 +2448,8 @@ Decrease the font size in all windows
 
 =item B<Ctrl-a F>
 
-Increase the font size in all windows (Currently not working)
+Increase the font size in all windows (note: you have to release the 
+shift key before this reacts)
 
 =item B<Ctrl-a K>
 
