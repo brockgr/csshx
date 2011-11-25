@@ -3,7 +3,7 @@
 #==============================================================================#
 # csshX -- Cluster SSH tool for Mac OS X Terminal.app                          #
 #==============================================================================#
-# Copyright 2010 by Gavin Brock <gbrock@cpan.org>                              #
+# Copyright 2011 by Gavin Brock <gbrock@cpan.org>                              #
 #                                                                              #
 # This program is free software; you may redistribute it and/or modify it      #
 # under the same terms as Perl itself.                                         #
@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.74-2-gb10e018$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74-2-gb10e019$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
