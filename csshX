@@ -1520,7 +1520,7 @@ my $modes = {
             "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
-            "[g/G]rid, [f/F]ont size, spli[t/T] panes, clear s[k]rollback, [d]ump scrollback to file  e[x]it\r\n";
+            "[g/G]rid, [f/F]ont size, split [p/P]anes, clear s[k]rollback, [d]ump scrollback to file  e[x]it\r\n";
         },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1559,13 +1559,13 @@ my $modes = {
                     $x = $slaves if $x > $slaves;
                     $config->set('tile_x', $x);
                     $obj->master->arrange_windows;
-                } elsif ($buffer =~ s/^t//) {
+                } elsif ($buffer =~ s/^p//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->split;
                     }
                     $obj->master->arrange_windows;
                     return $obj->set_mode_and_parse('input', $buffer);
-                } elsif ($buffer =~ s/^T//) {
+                } elsif ($buffer =~ s/^P//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->unsplit;
                     }
@@ -2472,11 +2472,11 @@ Increase the number of grid columns used for tiling windows
 
 Decrease the number of grid columns used for tiling windows
 
-=item B<Ctrl-a t>
+=item B<Ctrl-a p>
 
 Split all the terminal panes
 
-=item B<Ctrl-a T>
+=item B<Ctrl-a P>
 
 Close split panes 
 
