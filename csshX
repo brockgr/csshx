@@ -2172,7 +2172,11 @@ package main;
 
 $config = CsshX::Config->new;
 
-die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
+die "Sorry, need OS-X 10.5 or higher!\n"
+    if ($config->osver lt qv(10.5.0));
+
+die "csshX must be run as the logged in user!\n"
+    if ($> != (stat POSIX::ttyname(0))[4]);
 
 # Workaround for boolean ObjCBridge bug in 10.6 (fixed in 10.7)
 # For calls that return bools (which we don't actully use) generate
@@ -2924,7 +2928,7 @@ Project page L<http://code.google.com/p/csshx/>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2011 by Gavin Brock <gbrock@cpan.org>.
+Copyright 2012 by Gavin Brock <gbrock@cpan.org>.
 
 This program is free software; you may redistribute it and/or modify it
 under the same terms as Perl itself.
