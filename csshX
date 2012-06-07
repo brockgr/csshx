@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.74-2-gb10e019$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.73-37-g17e4d65$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -516,7 +516,13 @@ sub open_window {
     my $cmd = join ' ', map { s/(["'])/\\$1/g; "'$_'" } @args;
 
     # don't exec if debugging so we can see errors
-    $cmd = "clear && exec $cmd" unless $config->debug;
+    unless ($config->debug) {
+      if (get_shell =~ /^fish$/) {
+          $cmd = "clear; and exec $cmd" unless $config->debug;
+      } else {
+          $cmd = "clear && exec $cmd" unless $config->debug;
+      }
+    }
 
     # Hide the command from any shell history
     $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
@@ -2903,7 +2909,10 @@ For full details of Growl, visit L<http://growl.info/>.
 
 =head1 BUGS
 
-None known.  Please submit any bugs you might encounter, or feature
+There is explicit support for bash and fish shells - most other
+shells will work, but may suffer from history pollution.
+
+Please submit any bugs you might encounter, or feature
 requests to L<http://code.google.com/p/csshx/issues/>
 
 
