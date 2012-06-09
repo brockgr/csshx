@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.73-37-g17e4d65$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.73-38-g5c0f684$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -517,7 +517,7 @@ sub open_window {
 
     # don't exec if debugging so we can see errors
     unless ($config->debug) {
-      if (get_shell =~ /^fish$/) {
+      if (get_shell =~ /fish$/) {
           $cmd = "clear; and exec $cmd" unless $config->debug;
       } else {
           $cmd = "clear && exec $cmd" unless $config->debug;
