@@ -2419,7 +2419,7 @@ as opposed to the default
 
 =item B<--bash_env>
 
-Dump environemnt for bash completion of clusters - see L<SHELL COMPLETION>
+Dump environment for bash completion of clusters - see L<SHELL COMPLETION>
 
 =item B<--debug> I<number>
 
@@ -2935,7 +2935,7 @@ See --debug in L<OPTIONS>
 
 =head1 SHELL COMPLETION
 
-Automatic shell completion of cluster names can be endabled by adding the
+Automatic shell completion of cluster names can be enabled by adding the
 following line to your ~/.bash_profile, or similar:
 
     eval "$(csshX --bash_env)"
@@ -2943,7 +2943,7 @@ following line to your ~/.bash_profile, or similar:
 This will mean that pressing B<tab> after csshX in your shell will display
 a list of clusters from your configuration files.
 
-This uses the super secret --list_clusters arguement.
+This uses the super secret B<--list_clusters> arguement.
 
 For zsh support, bash compatiblity can be used by doing:
 
