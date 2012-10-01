@@ -56,5 +56,5 @@ CREDITS:
 
 Thanks to everyone for the suggestions and bug reports. That's what makes
 coding fun. In addition, I would like to thank the following people for their
-patches: Eric Lubow, mtbeedee, Mitch Silverstein, Robin Stephenson, 
-Chris Yunker and Song Gao.
+patches and code: Eric Lubow, mtbeedee, Mitch Silverstein, Robin Stephenson, 
+Chris Yunker, Song Gao and Jean-Sebastien Morisset.
