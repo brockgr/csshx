@@ -524,9 +524,15 @@ sub open_window {
       }
     }
 
-    # Hide the command from any shell history
-    $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
-    # TODO - (t)csh, ksh, zsh 
+    if (get_shell =~ /zsh/) {
+        # Requires 'setopt histignorespace'
+        $cmd = " $cmd";
+    } elsif (get_shell =~ m{/(ba)?sh$}) {
+        # Hide the command from any shell history
+        $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd;
+    }
+
+    # TODO - (t)csh, ksh
 
     my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
 
