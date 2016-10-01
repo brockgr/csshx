@@ -1,8 +1,8 @@
-            -------------------------------------------------
-            csshX - Cluster SSH tool for Mac OS X Termial.app
-            -------------------------------------------------
+            --------------------------------------------------
+            csshX - Cluster SSH tool for Mac OS X Terminal.app
+            --------------------------------------------------
             Copyright 2011 by Gavin Brock   <gbrock@cpan.org>
-            -------------------------------------------------
+            --------------------------------------------------
 
 
 INSTALLATION:
@@ -21,16 +21,11 @@ The documentation for csshX is self contained. Please run:
 
     ./csshX --man
 
-If that does not work, you can try the FAQ:
-
-    http://code.google.com/p/csshx/wiki/FAQ
-
-
 UPDATES:
 
 The latest version of the software is available here:
 
-    http://code.google.com/p/csshx/
+    https://github.com/brockgr/csshx
 
 Important update information will be posted on:
 
