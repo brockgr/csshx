@@ -437,17 +437,19 @@ use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
 @NSWorkspace::ISA = @SBApplication::ISA = @NSScreen::ISA = @NSColor::ISA =
-@NSEvent::ISA =
+@NSEvent::ISA = @NSApplication::ISA =
     qw(PerlObjCBridge);
 
 
-my ($terminal,$sysevents);
+my ($app,$terminal,$sysevents);
 sub init {
     eval "use Foundation; use List::Util qw(min max) "; die $@ if $@;
 
     NSBundle->bundleWithPath_(
         '/System/Library/Frameworks/ScriptingBridge.framework' # Loads AppKit too
     )->load;
+
+    $app = NSApplication->sharedApplication();
     
     $terminal = SBApplication->applicationWithBundleIdentifier_(
         "com.apple.terminal"
