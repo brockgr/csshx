@@ -632,45 +632,49 @@ sub physical_screen_bounds {
     my $scr1   = [ObjCStruct::NSRect->unpack($frame1)];
 
     if (defined $s2) {
-        # If it's a screen range - try to find a rectangle that
-        # fits neatly across the screens
+        if (NSScreen->screensHaveSeparateSpaces) {
+            warn "screen ranges are only supported when they all use the same space";
+            return $scr1;
+        } else {
+            # If it's a screen range - try to find a rectangle that
+            # fits neatly across the screens
 
-        die "No such screen [$s2], screen must be $displays or less"
-            if $s2 > $displays;
+            die "No such screen [$s2], screen must be $displays or less"
+                if $s2 > $displays;
     
-        my $frame2 = NSScreen->screens->objectAtIndex_($s2-1)->visibleFrame;
-        my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
+            my $frame2 = NSScreen->screens->objectAtIndex_($s2-1)->visibleFrame;
+            my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
 
-        my $out  = [];       
+            my $out  = [];
         
-        if ($scr2->[0] >= ($scr1->[0]+$scr1->[2])) {
-            # Left of scr2, is to right of right of scr1
-            $out->[0] = $scr1->[0];
-            $out->[2] = ($scr2->[0] + $scr2->[2]) - $scr1->[0];
-        } elsif ($scr1->[0] >= ($scr2->[0]+$scr2->[2])) {
-            # Left of scr1, is to right of right of scr2
-            $out->[0] = $scr2->[0];
-            $out->[2] = ($scr1->[0] + $scr1->[2]) - $scr2->[0];
-        } else {
-            $out->[0] = max($scr1->[0], $scr2->[0]);
-            $out->[2] = min($scr1->[2], $scr2->[2]);
-        }
+            if ($scr2->[0] >= ($scr1->[0]+$scr1->[2])) {
+                # Left of scr2, is to right of right of scr1
+                $out->[0] = $scr1->[0];
+                $out->[2] = ($scr2->[0] + $scr2->[2]) - $scr1->[0];
+            } elsif ($scr1->[0] >= ($scr2->[0]+$scr2->[2])) {
+                # Left of scr1, is to right of right of scr2
+                $out->[0] = $scr2->[0];
+                $out->[2] = ($scr1->[0] + $scr1->[2]) - $scr2->[0];
+            } else {
+                $out->[0] = max($scr1->[0], $scr2->[0]);
+                $out->[2] = min($scr1->[2], $scr2->[2]);
+            }
         
-        if ($scr2->[1] >= ($scr1->[1]+$scr1->[3])) {
-            # Bottom of scr2, is above top of scr1
-            $out->[1] = $scr1->[1];
-            $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
-        } elsif ($scr1->[1] >= ($scr2->[1]+$scr2->[3])) {
-            # Bottom of scr1, is above top of scr2
-            $out->[1] = $scr2->[1];
-            $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
-        } else {
-            $out->[1] = max($scr1->[1], $scr2->[1]);
-            $out->[3] = min($scr1->[3], $scr2->[3]);
+            if ($scr2->[1] >= ($scr1->[1]+$scr1->[3])) {
+                # Bottom of scr2, is above top of scr1
+                $out->[1] = $scr1->[1];
+                $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
+            } elsif ($scr1->[1] >= ($scr2->[1]+$scr2->[3])) {
+                # Bottom of scr1, is above top of scr2
+                $out->[1] = $scr2->[1];
+                $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
+            } else {
+                $out->[1] = max($scr1->[1], $scr2->[1]);
+                $out->[3] = min($scr1->[3], $scr2->[3]);
+            }
+
+            return $out;
         }
-
-        return $out;
-
     } else {
 
         return $scr1;
