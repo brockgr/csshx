@@ -520,7 +520,7 @@ sub OSType ($) { return unpack('N', $_[0]) }
 sub open_window {
     my ($pack, @args) = @_;
 
-    # Quote the command arguements
+    # Quote the command arguments
     my $cmd = join ' ', map { s/(["'])/\\$1/g; "'$_'" } @args;
 
     # don't exec if debugging so we can see errors
@@ -2892,7 +2892,7 @@ See --ssh_args in L<OPTIONS>
 
 =item B<remote_command>
 
-Command to run on remoted machines.
+Command to run on remote machines.
 See --remote_command in L<OPTIONS>
 
 =item B<hosts>
@@ -2948,9 +2948,9 @@ following line to your ~/.bash_profile, or similar:
 This will mean that pressing B<tab> after csshX in your shell will display
 a list of clusters from your configuration files.
 
-This uses the super secret B<--list_clusters> arguement.
+This uses the super secret B<--list_clusters> argument.
 
-For zsh support, bash compatiblity can be used by doing:
+For zsh support, bash compatibility can be used by doing:
 
     autoload bashcompinit
     bashcompinit
