@@ -23,6 +23,7 @@ package CsshX::Config;
 use Getopt::Long;
 use Socket;
 use POSIX qw(uname);
+use version;
 
 # All possible config keys
 my @config_keys = qw(
@@ -98,6 +99,11 @@ sub new {
 
     $obj->load_hosts($_)  foreach @{$obj->{hosts}};
     $obj->load_csshrc($_) foreach @{$obj->{config}};
+
+    if ($obj->{space} && ($obj->{osver} ge qv(10.7.0))) {
+        warn "space number not supported on 10.7 (Lion) or newer\n";
+        $obj->{space} = 0;
+    }
 
     return $obj;
 }
@@ -832,7 +838,6 @@ package CsshX::Window::Master;
 
 use base qw(CsshX::Window);
 
-
 sub format_master {
     my ($obj) = @_;
 
@@ -1228,13 +1233,7 @@ sub new {
     ) or die "Master window failed to open";
     $greeting .= $master->uid."\n";
 
-    if ($config->space) {
-        use version; if ($config->osver ge qv(10.7.0)) {
-            warn "Currently space number not supported on 10.7 Lion\n";
-        } else {
-            $master->set_space($config->space);
-        }
-    }
+    $master->set_space($config->space) if ($config->space);
 
     $master->set_settings_set($config->master_settings_set)
         if $config->master_settings_set;
@@ -2876,7 +2875,7 @@ See --screen in L<OPTIONS>
 
 =item B<space>
 
-(Currently not supported on 10.7 Lion)
+(not supported on 10.7 (Lion) or newer)
 
 (csshX only) The Space in which to draw the terminal windows.
 See --space in L<OPTIONS>
