@@ -653,11 +653,11 @@ sub physical_screen_bounds {
 
             my $out  = [];
         
-            if ($scr2->[0] >= ($scr1->[0]+$scr1->[2])) {
+            if ($scr2->[0] >= ($scr1->[0] + $scr1->[2])) {
                 # Left of scr2, is to right of right of scr1
                 $out->[0] = $scr1->[0];
                 $out->[2] = ($scr2->[0] + $scr2->[2]) - $scr1->[0];
-            } elsif ($scr1->[0] >= ($scr2->[0]+$scr2->[2])) {
+            } elsif ($scr1->[0] >= ($scr2->[0] + $scr2->[2])) {
                 # Left of scr1, is to right of right of scr2
                 $out->[0] = $scr2->[0];
                 $out->[2] = ($scr1->[0] + $scr1->[2]) - $scr2->[0];
@@ -666,14 +666,24 @@ sub physical_screen_bounds {
                 $out->[2] = min($scr1->[2], $scr2->[2]);
             }
         
-            if ($scr2->[1] >= ($scr1->[1]+$scr1->[3])) {
+            if ($scr2->[1] >= ($scr1->[1] + $scr1->[3])) {
                 # Bottom of scr2, is above top of scr1
                 $out->[1] = $scr1->[1];
-                $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
-            } elsif ($scr1->[1] >= ($scr2->[1]+$scr2->[3])) {
+                if ($scr2->[1] > ($scr1->[1] + $scr1->[3])) {
+                    warn "window can't span a screen with visibility gaps";
+                    $out->[3] = $scr1->[3];
+                } else {
+                    $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
+                }
+            } elsif ($scr1->[1] >= ($scr2->[1] + $scr2->[3])) {
                 # Bottom of scr1, is above top of scr2
                 $out->[1] = $scr2->[1];
-                $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
+                if ($scr1->[1] > ($scr2->[1] + $scr2->[3])) {
+                    warn "window can't span a screen with visibility gaps";
+                    $out->[3] = $scr2->[3];
+                } else {
+                    $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
+                }
             } else {
                 $out->[1] = max($scr1->[1], $scr2->[1]);
                 $out->[3] = min($scr1->[3], $scr2->[3]);
