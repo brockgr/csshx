@@ -793,7 +793,7 @@ sub split {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('d', OSType('Kcmd'));
+    $sysevents->keystroke_using_('d', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -802,7 +802,7 @@ sub unsplit {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('D', OSType('Kcmd'));
+    $sysevents->keystroke_using_('D', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -811,7 +811,7 @@ sub font_shrink {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('-', OSType('Kcmd'));
+    $sysevents->keystroke_using_('-', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -821,7 +821,7 @@ sub font_grow {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('+', OSType('Kcmd'));
+    $sysevents->keystroke_using_('+', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -830,10 +830,9 @@ sub clear_scrollback {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(2);
-    $sysevents->keystroke_using_('k', OSType('Kcmd'));
+    $sysevents->keystroke_using_('k', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
-
 
 sub terminate {
     my ($obj) = @_;
