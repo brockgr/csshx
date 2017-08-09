@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.74-34-g6a016af$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74-37-g61df2c5$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -24,6 +24,7 @@ use Getopt::Long;
 use Socket;
 use POSIX qw(uname);
 use version;
+use Scalar::Util qw(blessed);
 
 # All possible config keys
 my @config_keys = qw(
@@ -266,14 +267,14 @@ sub all_hosts {
         if (my $clusthosts = $obj->{clusters}->{$arg}) {
             print "Expand cluster: $arg => @$clusthosts\n" if $config->debug;
             push @ARGV, @$clusthosts;
-        } elsif (my $rangehosts = expand_hostrange($arg)){
+        } elsif ((not blessed $arg) && (my $rangehosts = expand_hostrange($arg))) {
             print "Expand host range: $arg => @$rangehosts\n" if $config->debug;
             push @ARGV, @$rangehosts;
         } else {
 
-            print "Host: $arg\n" if $config->debug;
-
             $arg = CsshX::Host->new($arg) unless ref $arg;
+
+            print "Host: $arg->{name}\n" if $config->debug;
 
             if ($ping) {
                 my ($user, $host, $port) = CsshX::Process->parse_user_host_port($arg->name);
