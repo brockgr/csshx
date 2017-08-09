@@ -39,6 +39,7 @@ my @config_keys = qw(
     session_max ping_test ping_timeout ssh interleave
     master_settings_set slave_settings_set
     sorthosts clusters list_clusters bash_env
+    pause_ms
 );
 
 foreach my $prop (@config_keys) {
@@ -75,7 +76,8 @@ sub new {
         no_growl                   => 0,
         interleave                 => 0,
         hosts                      => [],
-        clusters                   => {}
+        clusters                   => {},
+        pause_ms                   => 0
     }, ref($pack) || $pack;
 
     ($obj->{osver} = (uname())[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
@@ -92,7 +94,8 @@ sub new {
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
         'master_settings_set|mss=s',   'slave_settings_set|sss=s',
-        'interleave|i=i', 'sorthosts', 'list_clusters', 'bash_env'
+        'interleave|i=i', 'sorthosts', 'list_clusters', 'bash_env',
+        'pause_ms|pm=i'
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
@@ -1295,6 +1298,10 @@ sub new {
         $slave->set_space($config->space) if $config->space;
         $slave->set_settings_set($config->slave_settings_set)
             if $config->slave_settings_set;
+        # sleep for ten milliseconds to avoid DOS detection
+        if ($config->pause_ms > 0) {
+            select(undef, undef, undef, $config->pause_ms / 1000);
+        }
     }
     $greeting .= "done\n";
 
@@ -2436,6 +2443,12 @@ as opposed to the default
    clusterA1 clusterA2
    clusterA3 clusterB1
    clusterB2 clusterB3
+
+=item B<--pause_ms>, B<--pm> I<number>
+
+Pause this many miliiseconds after each window is created.  Helpful for avoiding denial of service from sshd when using a jump host for lots of connections.
+
+The value is in milliseconds. (default: 0)
 
 =item B<--bash_env>
 
