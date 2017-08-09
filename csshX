@@ -526,9 +526,9 @@ sub open_window {
     # don't exec if debugging so we can see errors
     unless ($config->debug) {
       if (get_shell =~ /fish$/) {
-          $cmd = "clear; and exec $cmd" unless $config->debug;
+          $cmd = "clear; and exec $cmd"
       } else {
-          $cmd = "clear && exec $cmd" unless $config->debug;
+          $cmd = "clear && exec $cmd"
       }
     }
 
@@ -903,16 +903,22 @@ sub bounds_as_size {
 
 sub move_slaves_to_master_space {
     my ($obj) = @_;
-    my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
-    my $i = lc $I;
     $obj->run_ruby("
-        require 'dl';
+        require 'fiddle'
+        require 'fiddle/import'
+
+        module LibCGS
+            extend Fiddle::Importer
+            dlload '/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices'
+            extern 'int _CGSDefaultConnection(int)'
+            extern 'int CGSMoveWorkspaceWindowList(int, int*, int, int)'
+        end
+
         ARGV.map! {|wid| Integer(wid)}
-        dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-        con = dl.sym('_CGSDefaultConnection', '${I}').call()
-        r,rs = dl.sym('CGSGetWindowWorkspace', '${I}${I}${I}${i}').call(con[0], ARGV.shift, 0)
-        dl.sym('CGSMoveWorkspaceWindowList', '${I}${I}A${I}${I}').call(con[0], ARGV, ARGV.length, rs[2])
-    ", map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
+        con = LibCGS._CGSDefaultConnection(0)
+        ptr = Fiddle::Pointer[ARGV.pack('i*')]
+        LibCGS.CGSMoveWorkspaceWindowList(con, ptr, ARGV.length, 1000)
+    ", map {$_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
 }
 
 
