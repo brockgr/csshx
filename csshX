@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.73-38-g5c0f684$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74-34-g6a016af$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -2986,7 +2986,7 @@ There is explicit support for bash and fish shells - most other
 shells will work, but may suffer from history pollution.
 
 Please submit any bugs you might encounter, or feature
-requests to L<http://code.google.com/p/csshx/issues/>
+requests to L<https://github.com/brockgr/csshx/issues>
 
 
 =head1 CREDITS
@@ -3005,7 +3005,7 @@ is included in the README.txt distributed with csshX.
 
 Gavin Brock <gbrock@cpan.org> L<http://brock-family.org/gavin>
 
-Project page L<http://code.google.com/p/csshx/>
+Project page L<https://github.com/brockgr/csshx>
 
 
 =head1 COPYRIGHT AND LICENSE

@@ -2,16 +2,14 @@
 
 use strict;
 use warnings;
-use FindBin qw($Bin);
+use FindBin qw($RealBin);
 use File::Temp qw(tempdir);
-
 
 chomp(my $cd = `git rev-parse --show-cdup`);
 chdir("./$cd") || die $!;
 
 my $tmpdir = tempdir(CLEANUP => 1);
-
-my $version = `./csshX -v 2>&1` || die "Cauld not get version from csshX";
+my $version = `./csshX -v 2>&1` || die "Could not get version from csshX";
 
 if ($version =~ /csshX\s+([\d.]+)(-\d+-\w+)?/) {
     $version = $1;
@@ -31,14 +29,10 @@ while(defined(my $file = <MANIFEST>)) {
 close(MANIFEST);
 
 chdir $tmpdir || die "chdir: $!";
-system("tar", "cvfz", "$tmpdir/csshX-$version.tgz", "csshX-$version") && die "tar: $!";
-
-system("$Bin/googlecode_upload.py", "--summary", "csshX v$version", "--labels", "OpSys-OSX,Type-Archive", "--project", "csshx", "$tmpdir/csshX-$version.tgz")
-   && die "Upload returned: $?";
+system("tar", "cvfz", "$RealBin/csshX-$version.tgz", "csshX-$version") && die "tar: $!";
 
 print "Done.\n";
 
 exit 0;
 
 # vim: expandtab sw=4 ts=4 sts=4:
-
