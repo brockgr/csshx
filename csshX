@@ -1205,11 +1205,19 @@ sub parse_user_host_port {
     #   hostname:port
     #   user@hostname
     #   user@hostname:port
-
-    if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
-        return ($1, $2, $3);
+    unless (($string =~ tr/://) gt 1) {
+        if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
+            return ($1, $2, $3);
+        } else {
+            return;
+        }
     } else {
-        return;
+        # assume IPv6
+        if ($string =~ /^(?:([^@]+)@)?\[?([0-9a-fA-F:]+)\]?(?::(.*))?$/) {
+            return ($1, $2, $3);
+        } else {
+            return;
+        }
     }
 }
 
@@ -2997,6 +3005,8 @@ For full details of Growl, visit L<http://growl.info/>.
 
 There is explicit support for bash and fish shells - most other
 shells will work, but may suffer from history pollution.
+
+Hostname expansion won't work if using IPv6 with a port
 
 Please submit any bugs you might encounter, or feature
 requests to L<https://github.com/brockgr/csshx/issues>
