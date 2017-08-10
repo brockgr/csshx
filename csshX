@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.74-37-g61df2c5$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74-37-g26b59f6$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -188,6 +188,7 @@ sub parse_bounds {
 
 sub parse_range {
     my ($pat) = @_;
+
     if ($pat =~ /,/) {
         return map { parse_range($_) } split ',', $pat;
     } elsif ($pat =~ /^([^-]+)-([^-]+)$/) {
@@ -231,7 +232,7 @@ sub expand_hostrange {
 
     if ($pat =~ /^(.*)\+(\d+)$/) {
       my $to_repeat = $1;
-      return [ map { expand_hostrange($to_repeat) || $to_repeat } (1..$2) ];
+      return [ map { $to_repeat } (1..$2) ];
     }
 
     my ($user, $host, $port) = CsshX::Process->parse_user_host_port($pat);
