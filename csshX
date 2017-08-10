@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.73-38-g5c0f684$') =~ s/\$Rev:\s*(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.74-37-g26b59f6$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -23,6 +23,8 @@ package CsshX::Config;
 use Getopt::Long;
 use Socket;
 use POSIX qw(uname);
+use version;
+use Scalar::Util qw(blessed);
 
 # All possible config keys
 my @config_keys = qw(
@@ -38,6 +40,7 @@ my @config_keys = qw(
     session_max ping_test ping_timeout ssh interleave
     master_settings_set slave_settings_set
     sorthosts clusters list_clusters bash_env
+    pause_ms
 );
 
 foreach my $prop (@config_keys) {
@@ -74,7 +77,8 @@ sub new {
         no_growl                   => 0,
         interleave                 => 0,
         hosts                      => [],
-        clusters                   => {}
+        clusters                   => {},
+        pause_ms                   => 0
     }, ref($pack) || $pack;
 
     ($obj->{osver} = (uname())[2]) =~ s/^(\d+)(\.\d+).*/"10.".($1-4)."$2"/e;
@@ -91,13 +95,19 @@ sub new {
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
         'master_settings_set|mss=s',   'slave_settings_set|sss=s',
-        'interleave|i=i', 'sorthosts', 'list_clusters', 'bash_env'
+        'interleave|i=i', 'sorthosts', 'list_clusters', 'bash_env',
+        'pause_ms|pm=i'
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
 
     $obj->load_hosts($_)  foreach @{$obj->{hosts}};
     $obj->load_csshrc($_) foreach @{$obj->{config}};
+
+    if ($obj->{space} && ($obj->{osver} ge qv(10.7.0))) {
+        warn "space number not supported on 10.7 (Lion) or newer\n";
+        $obj->{space} = 0;
+    }
 
     return $obj;
 }
@@ -178,6 +188,7 @@ sub parse_bounds {
 
 sub parse_range {
     my ($pat) = @_;
+
     if ($pat =~ /,/) {
         return map { parse_range($_) } split ',', $pat;
     } elsif ($pat =~ /^([^-]+)-([^-]+)$/) {
@@ -221,7 +232,7 @@ sub expand_hostrange {
 
     if ($pat =~ /^(.*)\+(\d+)$/) {
       my $to_repeat = $1;
-      return [ map { expand_hostrange($to_repeat) || $to_repeat } (1..$2) ];
+      return [ map { $to_repeat } (1..$2) ];
     }
 
     my ($user, $host, $port) = CsshX::Process->parse_user_host_port($pat);
@@ -257,14 +268,14 @@ sub all_hosts {
         if (my $clusthosts = $obj->{clusters}->{$arg}) {
             print "Expand cluster: $arg => @$clusthosts\n" if $config->debug;
             push @ARGV, @$clusthosts;
-        } elsif (my $rangehosts = expand_hostrange($arg)){
+        } elsif ((not blessed $arg) && (my $rangehosts = expand_hostrange($arg))) {
             print "Expand host range: $arg => @$rangehosts\n" if $config->debug;
             push @ARGV, @$rangehosts;
         } else {
 
-            print "Host: $arg\n" if $config->debug;
-
             $arg = CsshX::Host->new($arg) unless ref $arg;
+
+            print "Host: $arg->{name}\n" if $config->debug;
 
             if ($ping) {
                 my ($user, $host, $port) = CsshX::Process->parse_user_host_port($arg->name);
@@ -437,17 +448,19 @@ use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
 @NSWorkspace::ISA = @SBApplication::ISA = @NSScreen::ISA = @NSColor::ISA =
-@NSEvent::ISA =
+@NSEvent::ISA = @NSApplication::ISA =
     qw(PerlObjCBridge);
 
 
-my ($terminal,$sysevents);
+my ($app,$terminal,$sysevents);
 sub init {
     eval "use Foundation; use List::Util qw(min max) "; die $@ if $@;
 
     NSBundle->bundleWithPath_(
         '/System/Library/Frameworks/ScriptingBridge.framework' # Loads AppKit too
     )->load;
+
+    $app = NSApplication->sharedApplication();
     
     $terminal = SBApplication->applicationWithBundleIdentifier_(
         "com.apple.terminal"
@@ -512,15 +525,15 @@ sub OSType ($) { return unpack('N', $_[0]) }
 sub open_window {
     my ($pack, @args) = @_;
 
-    # Quote the command arguements
+    # Quote the command arguments
     my $cmd = join ' ', map { s/(["'])/\\$1/g; "'$_'" } @args;
 
     # don't exec if debugging so we can see errors
     unless ($config->debug) {
       if (get_shell =~ /fish$/) {
-          $cmd = "clear; and exec $cmd" unless $config->debug;
+          $cmd = "clear; and exec $cmd"
       } else {
-          $cmd = "clear && exec $cmd" unless $config->debug;
+          $cmd = "clear && exec $cmd"
       }
     }
 
@@ -630,45 +643,59 @@ sub physical_screen_bounds {
     my $scr1   = [ObjCStruct::NSRect->unpack($frame1)];
 
     if (defined $s2) {
-        # If it's a screen range - try to find a rectangle that
-        # fits neatly across the screens
+        if (NSScreen->screensHaveSeparateSpaces) {
+            warn "screen ranges are only supported when they all use the same space";
+            return $scr1;
+        } else {
+            # If it's a screen range - try to find a rectangle that
+            # fits neatly across the screens
 
-        die "No such screen [$s2], screen must be $displays or less"
-            if $s2 > $displays;
+            die "No such screen [$s2], screen must be $displays or less"
+                if $s2 > $displays;
     
-        my $frame2 = NSScreen->screens->objectAtIndex_($s2-1)->visibleFrame;
-        my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
+            my $frame2 = NSScreen->screens->objectAtIndex_($s2-1)->visibleFrame;
+            my $scr2   = [ObjCStruct::NSRect->unpack($frame2)];
 
-        my $out  = [];       
+            my $out  = [];
         
-        if ($scr2->[0] >= ($scr1->[0]+$scr1->[2])) {
-            # Left of scr2, is to right of right of scr1
-            $out->[0] = $scr1->[0];
-            $out->[2] = ($scr2->[0] + $scr2->[2]) - $scr1->[0];
-        } elsif ($scr1->[0] >= ($scr2->[0]+$scr2->[2])) {
-            # Left of scr1, is to right of right of scr2
-            $out->[0] = $scr2->[0];
-            $out->[2] = ($scr1->[0] + $scr1->[2]) - $scr2->[0];
-        } else {
-            $out->[0] = max($scr1->[0], $scr2->[0]);
-            $out->[2] = min($scr1->[2], $scr2->[2]);
-        }
+            if ($scr2->[0] >= ($scr1->[0] + $scr1->[2])) {
+                # Left of scr2, is to right of right of scr1
+                $out->[0] = $scr1->[0];
+                $out->[2] = ($scr2->[0] + $scr2->[2]) - $scr1->[0];
+            } elsif ($scr1->[0] >= ($scr2->[0] + $scr2->[2])) {
+                # Left of scr1, is to right of right of scr2
+                $out->[0] = $scr2->[0];
+                $out->[2] = ($scr1->[0] + $scr1->[2]) - $scr2->[0];
+            } else {
+                $out->[0] = max($scr1->[0], $scr2->[0]);
+                $out->[2] = min($scr1->[2], $scr2->[2]);
+            }
         
-        if ($scr2->[1] >= ($scr1->[1]+$scr1->[3])) {
-            # Bottom of scr2, is above top of scr1
-            $out->[1] = $scr1->[1];
-            $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
-        } elsif ($scr1->[1] >= ($scr2->[1]+$scr2->[3])) {
-            # Bottom of scr1, is above top of scr2
-            $out->[1] = $scr2->[1];
-            $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
-        } else {
-            $out->[1] = max($scr1->[1], $scr2->[1]);
-            $out->[3] = min($scr1->[3], $scr2->[3]);
+            if ($scr2->[1] >= ($scr1->[1] + $scr1->[3])) {
+                # Bottom of scr2, is above top of scr1
+                $out->[1] = $scr1->[1];
+                if ($scr2->[1] > ($scr1->[1] + $scr1->[3])) {
+                    warn "window can't span a screen with visibility gaps";
+                    $out->[3] = $scr1->[3];
+                } else {
+                    $out->[3] = ($scr2->[1] + $scr2->[3]) - $scr1->[1];
+                }
+            } elsif ($scr1->[1] >= ($scr2->[1] + $scr2->[3])) {
+                # Bottom of scr1, is above top of scr2
+                $out->[1] = $scr2->[1];
+                if ($scr1->[1] > ($scr2->[1] + $scr2->[3])) {
+                    warn "window can't span a screen with visibility gaps";
+                    $out->[3] = $scr2->[3];
+                } else {
+                    $out->[3] = ($scr1->[1] + $scr1->[3]) - $scr2->[1];
+                }
+            } else {
+                $out->[1] = max($scr1->[1], $scr2->[1]);
+                $out->[3] = min($scr1->[3], $scr2->[3]);
+            }
+
+            return $out;
         }
-
-        return $out;
-
     } else {
 
         return $scr1;
@@ -771,7 +798,7 @@ sub split {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('d', OSType('Kcmd'));
+    $sysevents->keystroke_using_('d', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -780,7 +807,7 @@ sub unsplit {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('D', OSType('Kcmd'));
+    $sysevents->keystroke_using_('D', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -789,7 +816,7 @@ sub font_shrink {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('-', OSType('Kcmd'));
+    $sysevents->keystroke_using_('-', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -799,7 +826,7 @@ sub font_grow {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(1);
-    $sysevents->keystroke_using_('+', OSType('Kcmd'));
+    $sysevents->keystroke_using_('+', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
 
@@ -808,10 +835,9 @@ sub clear_scrollback {
     $obj->winobj->setFrontmost_(1);
     wait_for_no_mod_keys();
     $obj->winobj->setFrontmost_(2);
-    $sysevents->keystroke_using_('k', OSType('Kcmd'));
+    $sysevents->keystroke_using_('k', 'Kcmd');
     $obj->winobj->setFrontmost_(1);
 }
-
 
 sub terminate {
     my ($obj) = @_;
@@ -825,7 +851,6 @@ sub terminate {
 package CsshX::Window::Master;
 
 use base qw(CsshX::Window);
-
 
 sub format_master {
     my ($obj) = @_;
@@ -883,16 +908,22 @@ sub bounds_as_size {
 
 sub move_slaves_to_master_space {
     my ($obj) = @_;
-    my $I = (length pack('L!',0) == 4 ) ? 'I' : 'L';
-    my $i = lc $I;
     $obj->run_ruby("
-        require 'dl';
+        require 'fiddle'
+        require 'fiddle/import'
+
+        module LibCGS
+            extend Fiddle::Importer
+            dlload '/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices'
+            extern 'int _CGSDefaultConnection(int)'
+            extern 'int CGSMoveWorkspaceWindowList(int, int*, int, int)'
+        end
+
         ARGV.map! {|wid| Integer(wid)}
-        dl = DL::dlopen('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-        con = dl.sym('_CGSDefaultConnection', '${I}').call()
-        r,rs = dl.sym('CGSGetWindowWorkspace', '${I}${I}${I}${i}').call(con[0], ARGV.shift, 0)
-        dl.sym('CGSMoveWorkspaceWindowList', '${I}${I}A${I}${I}').call(con[0], ARGV, ARGV.length, rs[2])
-    ", map { $_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
+        con = LibCGS._CGSDefaultConnection(0)
+        ptr = Fiddle::Pointer[ARGV.pack('i*')]
+        LibCGS.CGSMoveWorkspaceWindowList(con, ptr, ARGV.length, 1000)
+    ", map {$_->windowid} $obj, CsshX::Master::Socket::Slave->slaves);
 }
 
 
@@ -1176,11 +1207,19 @@ sub parse_user_host_port {
     #   hostname:port
     #   user@hostname
     #   user@hostname:port
-
-    if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
-        return ($1, $2, $3);
+    unless (($string =~ tr/://) gt 1) {
+        if ($string =~ /^(?:([^@]+)@)?([^:]+)(?::(.*))?$/) {
+            return ($1, $2, $3);
+        } else {
+            return;
+        }
     } else {
-        return;
+        # assume IPv6
+        if ($string =~ /^(?:([^@]+)@)?\[?([0-9a-fA-F:]+)\]?(?::(.*))?$/) {
+            return ($1, $2, $3);
+        } else {
+            return;
+        }
     }
 }
 
@@ -1222,13 +1261,7 @@ sub new {
     ) or die "Master window failed to open";
     $greeting .= $master->uid."\n";
 
-    if ($config->space) {
-        use version; if ($config->osver ge qv(10.7.0)) {
-            warn "Currently space number not supported on 10.7 Lion\n";
-        } else {
-            $master->set_space($config->space);
-        }
-    }
+    $master->set_space($config->space) if ($config->space);
 
     $master->set_settings_set($config->master_settings_set)
         if $config->master_settings_set;
@@ -1275,6 +1308,10 @@ sub new {
         $slave->set_space($config->space) if $config->space;
         $slave->set_settings_set($config->slave_settings_set)
             if $config->slave_settings_set;
+        # sleep for ten milliseconds to avoid DOS detection
+        if ($config->pause_ms > 0) {
+            select(undef, undef, undef, $config->pause_ms / 1000);
+        }
     }
     $greeting .= "done\n";
 
@@ -2417,6 +2454,12 @@ as opposed to the default
    clusterA3 clusterB1
    clusterB2 clusterB3
 
+=item B<--pause_ms>, B<--pm> I<number>
+
+Pause this many miliiseconds after each window is created.  Helpful for avoiding denial of service from sshd when using a jump host for lots of connections.
+
+The value is in milliseconds. (default: 0)
+
 =item B<--bash_env>
 
 Dump environment for bash completion of clusters - see L<SHELL COMPLETION>
@@ -2870,7 +2913,7 @@ See --screen in L<OPTIONS>
 
 =item B<space>
 
-(Currently not supported on 10.7 Lion)
+(not supported on 10.7 (Lion) or newer)
 
 (csshX only) The Space in which to draw the terminal windows.
 See --space in L<OPTIONS>
@@ -2887,7 +2930,7 @@ See --ssh_args in L<OPTIONS>
 
 =item B<remote_command>
 
-Command to run on remoted machines.
+Command to run on remote machines.
 See --remote_command in L<OPTIONS>
 
 =item B<hosts>
@@ -2943,16 +2986,13 @@ following line to your ~/.bash_profile, or similar:
 This will mean that pressing B<tab> after csshX in your shell will display
 a list of clusters from your configuration files.
 
-This uses the super secret B<--list_clusters> arguement.
+This uses the super secret B<--list_clusters> argument.
 
-For zsh support, bash compatiblity can be used by doing:
+For zsh support, bash compatibility can be used by doing:
 
-  autoload bashcompinit
-  bashcompinit
-  eval "$(csshX --bash_env)"
-
-=back
-
+    autoload bashcompinit
+    bashcompinit
+    eval "$(csshX --bash_env)"
 
 =head1 GROWL SUPPORT
 
@@ -2968,8 +3008,10 @@ For full details of Growl, visit L<http://growl.info/>.
 There is explicit support for bash and fish shells - most other
 shells will work, but may suffer from history pollution.
 
+Hostname expansion won't work if using IPv6 with a port
+
 Please submit any bugs you might encounter, or feature
-requests to L<http://code.google.com/p/csshx/issues/>
+requests to L<https://github.com/brockgr/csshx/issues>
 
 
 =head1 CREDITS
@@ -2988,7 +3030,7 @@ is included in the README.txt distributed with csshX.
 
 Gavin Brock <gbrock@cpan.org> L<http://brock-family.org/gavin>
 
-Project page L<http://code.google.com/p/csshx/>
+Project page L<https://github.com/brockgr/csshx>
 
 
 =head1 COPYRIGHT AND LICENSE
