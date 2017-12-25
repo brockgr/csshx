@@ -52,7 +52,7 @@ sub new {
     # Default config settings
     bless my $obj = {
         action_key                 => '\\001', # Ctrl-A
-        color_disabled_background  => '',
+        color_disabled_background  => '{55555,55555,55555}',
         color_disabled_foreground  => '{37779,37779,37779}',
         color_selected_background  => '{17990,35209,53456}',
         color_selected_foreground  => '',
@@ -60,7 +60,7 @@ sub new {
         color_master_foreground    => '{65535,65535,65535}',
         color_setbounds_background => '{17990,35209,53456}',
         color_setbounds_foreground => '',
-        master_height              => 87, # Pixels
+        master_height              => 77, # Pixels
         screen                     => 0,
         space                      => 0,
         debug                      => 0,
@@ -670,9 +670,12 @@ sub physical_screen_bounds {
         return $out;
 
     } else {
-
-        return $scr1;
-
+        my ($x,$y,$w,$h) = @$scr1;
+        # [NSScreen visiableFrame] seems including menu bar area for auxiliary monitors. has to get rid of it so the windows won't overlap
+        if ($scr != 1) {    
+            $h = $h - 23;    
+        }
+        return [$x,$y,$w,$h];
     }
 }
 
