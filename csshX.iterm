@@ -479,24 +479,13 @@ sub make_NSColor {
 my $shell;
 sub get_shell () {
     return $shell if $shell; # Cached for speed
+    # This works on Linux, OSX, and FreeBSD.  It may require /usr/ucb/ps on
+    # Solaris, but I haven't had a Solaris box in over a decade.
+    my $ppid = getppid();
+    my $shell = `ps -o command -p $ppid`;
+    $shell =~ /COMMAND\s+-(\S+)\s+.*/;
+    $shell = $1;
 
-    # Check Terminal.app settings
-    if (my $defs = NSUserDefaults->alloc->init) {
-        $defs->addSuiteNamed_("com.apple.terminal");
-
-        my $set = $defs->stringForKey_("Default Window Settings");
-        my $dict = $defs->dictionaryForKey_("Window Settings");
-        if ($set && $$set && $dict && $$dict) {
-            my $subdict = $dict->objectForKey_($set);
-            if ($subdict && $$subdict) {
-                my $shellStr = $subdict->objectForKey_("CommandString");
-                $shell = $shellStr->UTF8String if $shellStr && $$shellStr;
-            }
-        }
-    }
-
-    # else try the 'passwd' file
-    $shell ||= (getpwuid "$>")[8];
     return $shell;
 }
 
