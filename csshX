@@ -3,7 +3,7 @@
 #==============================================================================#
 # csshX -- Cluster SSH tool for Mac OS X Terminal.app                          #
 #==============================================================================#
-# Copyright 2010 by Gavin Brock <gbrock@cpan.org>                              #
+# Copyright 2011 by Gavin Brock <gbrock@cpan.org>                              #
 #                                                                              #
 # This program is free software; you may redistribute it and/or modify it      #
 # under the same terms as Perl itself.                                         #
@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use version; (our $VERSION = '$Rev: 0.74$') =~ s/\$Rev:(.*)\$/$1/;
+use version; (our $VERSION = '$Rev: 0.73-38-g5c0f684$') =~ s/\$Rev:\s*(.*)\$/$1/;
 
 my $config; # Global configuration object..
 
@@ -37,7 +37,7 @@ my @config_keys = qw(
     slave slavehost slaveid sock version osver
     session_max ping_test ping_timeout ssh interleave
     master_settings_set slave_settings_set
-    sorthosts
+    sorthosts clusters list_clusters bash_env
 );
 
 foreach my $prop (@config_keys) {
@@ -91,7 +91,7 @@ sub new {
         'session_max=i', 'help|h',     'man|m',          'version|v',
         'ssh=s',       'hosts=s@',     'remote_command=s','no_growl',
         'master_settings_set|mss=s',   'slave_settings_set|sss=s',
-        'interleave|i=i', 'sorthosts'
+        'interleave|i=i', 'sorthosts', 'list_clusters', 'bash_env'
     ) || $obj->pod(-msg => "$0: bad usage\n");
 
     # Load any extra configs specified in config file or command line
@@ -437,10 +437,11 @@ use base qw(IO::Handle);
 
 # Define ScriptingBridge/AppKit objects that we will use
 @NSWorkspace::ISA = @SBApplication::ISA = @NSScreen::ISA = @NSColor::ISA =
+@NSEvent::ISA =
     qw(PerlObjCBridge);
 
 
-my $terminal;
+my ($terminal,$sysevents);
 sub init {
     eval "use Foundation; use List::Util qw(min max) "; die $@ if $@;
 
@@ -452,8 +453,11 @@ sub init {
         "com.apple.terminal"
     );
 
-    Growl->init;
+    $sysevents = SBApplication->applicationWithBundleIdentifier_(
+        "com.apple.SystemEvents"
+    );
 
+    Growl->init;
 }
 
 my ($cur_bounds, $max_bounds);
@@ -753,6 +757,59 @@ sub space {
         exit rs[2]
     ", $obj->windowid);
 }
+
+
+# Cheeesy test to block until no modifier keys are pressed
+sub wait_for_no_mod_keys {
+    1 while NSEvent->modifierFlags != 0
+}
+
+sub split {
+    my ($obj) = @_;
+    $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
+    $sysevents->keystroke_using_('d', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
+}
+
+sub unsplit {
+    my ($obj) = @_;
+    $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
+    $sysevents->keystroke_using_('D', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
+}
+
+sub font_shrink {
+    my ($obj) = @_;
+    $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
+    $sysevents->keystroke_using_('-', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
+}
+
+# This is failing due to "shift" being pressed :-(
+sub font_grow {
+    my ($obj) = @_;
+    $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(1);
+    $sysevents->keystroke_using_('+', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
+}
+
+sub clear_scrollback {
+    my ($obj) = @_;
+    $obj->winobj->setFrontmost_(1);
+    wait_for_no_mod_keys();
+    $obj->winobj->setFrontmost_(2);
+    $sysevents->keystroke_using_('k', OSType('Kcmd'));
+    $obj->winobj->setFrontmost_(1);
+}
+
 
 sub terminate {
     my ($obj) = @_;
@@ -1467,7 +1524,7 @@ my $modes = {
             "[c]reate window, [r]etile, s[o]rt, [e]nable/disable input, e[n]able all, ".
             ( (@slaves > 1) && (@enabled == 1) ? "[Space] Enable next " : '').
             "[t]oggle enabled, [m]inimise, [h]ide, [s]end text, change [b]ounds, ".
-            "chan[g]e [G]rid, e[x]it\r\n";
+            "[g/G]rid, [f/F]ont size, split [p/P]anes, clear s[k]rollback, [d]ump scrollback to file  e[x]it\r\n";
         },
         parse_buffer => sub {
             my ($obj, $buffer) = @_;
@@ -1506,6 +1563,36 @@ my $modes = {
                     $x = $slaves if $x > $slaves;
                     $config->set('tile_x', $x);
                     $obj->master->arrange_windows;
+                } elsif ($buffer =~ s/^p//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->split;
+                    }
+                    $obj->master->arrange_windows;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^P//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->unsplit;
+                    }
+                    $obj->master->arrange_windows;
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^f//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->font_shrink;
+                    }
+                    $obj->master->font_shrink;
+                } elsif ($buffer =~ s/^F//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->font_grow;
+                    }
+                    $obj->master->font_grow;
+                } elsif ($buffer =~ s/^k//) {
+                    foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                        $window->clear_scrollback;
+                    }
+                    $obj->master->winobj->setFrontmost_(1);
+                    return $obj->set_mode_and_parse('input', $buffer);
+                } elsif ($buffer =~ s/^d//) {
+                    return $obj->set_mode_and_parse('dumpscrollback', $buffer);
                 } elsif ($buffer =~ s/^n//) {
                     foreach my $window (CsshX::Master::Socket::Slave->slaves) {
                         $window->unzoom;
@@ -1762,6 +1849,41 @@ my $modes = {
             $obj->set_read_buffer($buffer);
         },
     },
+    'dumpscrollback' => {
+        prompt => sub { 'File base name (will be relative to your home folder) [Desktop/csshx_scrollback]: ' },
+        onchange => sub { system '/bin/stty', 'sane' },
+        parse_buffer => sub {
+            my ($obj, $buffer) = @_;
+            if ($buffer =~ s/^([^\n]*)\e//) {
+                return $obj->set_mode_and_parse('input', $buffer);
+            } elsif ($buffer =~ s/^(.*?)\r?\n//) {
+                my $filename = $1;
+                $filename = "Desktop/csshx_scrollback" unless length $filename;
+
+                my %seen;
+                foreach my $window (CsshX::Master::Socket::Slave->slaves) {
+                    # Keep only good file name chars - this is not exhaustive
+                    (my $extension = $window->hostname) =~ s/[^-@.+()=\w]+/_/g;
+
+                    # Create a unique extension if we have many hosts with the same name
+                    if ($seen{$extension}) {
+                        my $n = 1;
+                        $n++ while $seen{"$extension.$n"};
+                        $extension = "$extension.$n";
+                    }
+
+                    $seen{$extension} = 1;
+                    print "Writing to [$filename.$extension.txt]\n" if $config->debug;
+                    open(my $out, ">", "$filename.$extension.txt") || warn $!;
+                    print $out $window->tabobj->history->UTF8String;
+                    close($out);
+                }
+
+                return $obj->set_mode_and_parse('input', $buffer);
+            }
+            $obj->set_read_buffer($buffer);
+        },
+    },
 };
 
 
@@ -1953,6 +2075,35 @@ sub terminate {
 }
 
 
+
+#==============================================================================#
+
+package CsshX::Env;
+
+use FindBin qw($Bin $Script);;
+
+
+sub list_clusters {
+  print join(' ', keys %{$config->clusters})."\n"
+}
+
+sub bash {
+  print qq{
+    # USAGE - In your ~/.bash_profile add:
+    #   eval "\$($Bin/$Script --bash_env)"
+
+    function _complete_csshx () {
+       COMPREPLY=()
+       cur="\${COMP_WORDS[COMP_CWORD]}"
+       host_list=`$Bin/$Script --list_clusters`
+       COMPREPLY=( \$(compgen -W "\${host_list}" -- \$cur))
+       return 0
+    }
+    complete -F _complete_csshx csshX
+  }
+}
+
+
 #==============================================================================#
 # Growl support - This is the distilled essence of Mac::Growl
 # 
@@ -2054,7 +2205,11 @@ package main;
 
 $config = CsshX::Config->new;
 
-die "Sorry, need OS-X 10.5 or higher\n" if ($config->osver lt qv(10.5.0));
+die "Sorry, need OS-X 10.5 or higher!\n"
+    if ($config->osver lt qv(10.5.0));
+
+die "csshX must be run as the logged in user!\n"
+    if (-t STDOUT) && ($> != (stat POSIX::ttyname(0))[4]);
 
 # Workaround for boolean ObjCBridge bug in 10.6 (fixed in 10.7)
 # For calls that return bools (which we don't actully use) generate
@@ -2080,6 +2235,8 @@ eval 'use Carp; $SIG{ __DIE__ } = sub { Carp::confess( @_ ); sleep 10; }; $PerlO
     if $config->debug; # Stack trace on death
 
 if    ($config->help)    { $config->pod(-verbose => 1)                        }
+elsif ($config->list_clusters){ CsshX::Env->list_clusters()                   }
+elsif ($config->bash_env){ CsshX::Env->bash()                                 }
 elsif ($config->man)     { $config->pod(-verbose => 2)                        }
 elsif ($config->version) { die sprintf "csshX $VERSION\n", $VERSION           }
 elsif ($config->master)  { CsshX::Master->new()                               }
@@ -2258,6 +2415,10 @@ as opposed to the default
    clusterA3 clusterB1
    clusterB2 clusterB3
 
+=item B<--bash_env>
+
+Dump environment for bash completion of clusters - see L<SHELL COMPLETION>
+
 =item B<--debug> I<number>
 
 Sets the debug level. Number is optional and will default to 1 if omitted.
@@ -2353,6 +2514,33 @@ Increase the number of grid columns used for tiling windows
 =item B<Ctrl-a G>
 
 Decrease the number of grid columns used for tiling windows
+
+=item B<Ctrl-a p>
+
+Split all the terminal panes
+
+=item B<Ctrl-a P>
+
+Close split panes 
+
+=item B<Ctrl-a f>
+
+Decrease the font size in all windows
+
+=item B<Ctrl-a F>
+
+Increase the font size in all windows (note: you have to release the 
+shift key before this reacts)
+
+=item B<Ctrl-a K>
+
+Clear the scroll-back in all slave terminals (by sending Command-k to each one)
+
+=item B<Ctrl-a d>
+
+Dump the terminal scrollback histories to files. You will be promted for
+a base filename (defaults to ~/Desktop/csshx_scrollback). A unique terminal name will
+be appended to this base.
 
 =item B<Ctrl-a m>  
 
@@ -2743,6 +2931,27 @@ See --debug in L<OPTIONS>
 
 =back
 
+=head1 SHELL COMPLETION
+
+Automatic shell completion of cluster names can be enabled by adding the
+following line to your ~/.bash_profile, or similar:
+
+    eval "$(csshX --bash_env)"
+
+This will mean that pressing B<tab> after csshX in your shell will display
+a list of clusters from your configuration files.
+
+This uses the super secret B<--list_clusters> arguement.
+
+For zsh support, bash compatiblity can be used by doing:
+
+  autoload bashcompinit
+  bashcompinit
+  eval "$(csshX --bash_env)"
+
+=back
+
+
 =head1 GROWL SUPPORT
 
 If Growl is installed, certain events will trigger notifications.
@@ -2754,7 +2963,10 @@ For full details of Growl, visit L<http://growl.info/>.
 
 =head1 BUGS
 
-None known.  Please submit any bugs you might encounter, or feature
+There is explicit support for bash and fish shells - most other
+shells will work, but may suffer from history pollution.
+
+Please submit any bugs you might encounter, or feature
 requests to L<http://code.google.com/p/csshx/issues/>
 
 
@@ -2779,7 +2991,7 @@ Project page L<http://code.google.com/p/csshx/>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2010 by Gavin Brock <gbrock@cpan.org>.
+Copyright 2012 by Gavin Brock <gbrock@cpan.org>.
 
 This program is free software; you may redistribute it and/or modify it
 under the same terms as Perl itself.
