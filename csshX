@@ -516,34 +516,32 @@ sub open_window {
     my $cmd = join ' ', map { s/(["'])/\\$1/g; "'$_'" } @args;
 
     # don't exec if debugging so we can see errors
-    unless ($config->debug) {
-      if (get_shell =~ /fish$/) {
-          $cmd = "clear; and exec $cmd" unless $config->debug;
-      } else {
-          $cmd = "clear && exec $cmd" unless $config->debug;
-      }
-    }
+    $cmd = "clear && exec $cmd" unless $config->debug;
 
     # Hide the command from any shell history
     $cmd = 'history -d $(($HISTCMD-1)) && '.$cmd if get_shell =~ m{/(ba)?sh$};
     # TODO - (t)csh, ksh, zsh 
 
     my $tabobj = $terminal->doScript_in_($cmd, undef) || return;
+    my $tty = $tabobj->tty->UTF8String || return;
 
-    # Get the window and tab IDs from the Apple Event itself
-    my $tab_ed = $tabobj->qualifiedSpecifier; # Undocumented call
-    my $tab_id = $tab_ed->descriptorForKeyword_(OSType 'seld')->int32Value-1;
-    my $win_ed = $tab_ed->descriptorForKeyword_(OSType 'from');
-    my $win_id = $win_ed->descriptorForKeyword_(OSType 'seld')->int32Value.'';
-
-    # Create an object unless we were passed one
-    my $obj = ref $pack ? $pack : $pack->SUPER::new();
-    $obj->set_windowid($win_id);
-    $obj->set_tabid($tab_id);
-
-    return $obj;
+    my $windows = $terminal->windows;
+     # Quickly check if the tty even exists, since the next code is REALLY slow
+    #return unless grep { $tty eq $_ } @{Foundation::perlRefFromObjectRef $windows->valueForKey_("tty")};
+    for (my $n=0; $n<$windows->count; $n++) {
+        my $window = $windows->objectAtIndex_($n);
+        my $tabs = $window->tabs;
+        for (my $m=0; $m<$tabs->count; $m++) {
+            my $tab = $tabs->objectAtIndex_($m);
+            if ($tab->tty && ($tab->tty->UTF8String eq $tty)) {
+                my $obj = ref $pack ? $pack : $pack->SUPER::new();
+                $obj->set_windowid("".$window->id);
+                $obj->set_tabid($m);
+                return $obj;
+            }
+        }
+    }
 }
-
 
 sub set_windowid  { *{$_[0]}->{windowid} = $_[1]; }
 sub windowid      { *{$_[0]}->{windowid};         }
