@@ -1190,7 +1190,7 @@ sub parse_user_host_port {
 package CsshX::Launcher;
 
 use base    qw(CsshX::Socket::Selectable);
-use POSIX   qw(tmpnam);
+use File::Temp qw(tempfile);
 use FindBin qw($Bin $Script);;
 
 sub new {
@@ -1205,7 +1205,8 @@ sub new {
     CsshX::Window->screen_bounds;
 
     my @hosts  = $config->all_hosts;
-    my $sock   = $config->sock || tmpnam();
+    my ($fh, $filename) = tempfile();
+    my $sock = $config->sock || $filename;
     my $login  = $config->login || '';
     my @config = @{$config->config};
 
