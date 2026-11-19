@@ -414,8 +414,8 @@ sub readers { *{$_[0]}->{readers} }
 sub writers { *{$_[0]}->{writers} }
 
 sub handle_io {
-    my ($obj) = @_;
-    my ($can_read, $can_write) = IO::Select::select($obj->readers, $obj->writers);
+    my ($obj, $timeout) = @_;
+    my ($can_read, $can_write) = IO::Select::select($obj->readers, $obj->writers, undef, $timeout);
     foreach my $reader (@$can_read)  { $reader->can_read()   }
     foreach my $writer (@$can_write) { $writer->write_buffered && 
                                        $obj->writers->remove($writer); }
@@ -553,7 +553,8 @@ sub tabid         { *{$_[0]}->{tabid};         }
 
 sub uid           {  $_[0]->windowid.','. $_[0]->tabid }
 
-sub winobj { $terminal->windows->objectWithID_($_[0]->windowid) }
+sub winobj_by_id { $terminal->windows->objectWithID_($_[1]) }
+sub winobj { $_[0]->winobj_by_id($_[0]->windowid) }
 sub tabobj { $_[0]->winobj->tabs->objectAtIndex_($_[0]->tabid) }
 
 sub set_bg_color {
@@ -1319,7 +1320,7 @@ sub new {
         local $SIG{CHLD} = sub { warn "CHILD"; $obj->terminate; wait };
         local $SIG{TTOU} = 'IGNORE';
 
-        my $greeting = 'slave '.$config->slaveid.' '.$config->slavehost."\n";
+        my $greeting = 'slave '.$config->slaveid.' '.$config->slavehost.' '.POSIX::ttyname(0)."\n";
 
         $obj->set_write_buffer($greeting);
         $obj->writers->add($obj);
@@ -1401,12 +1402,15 @@ sub new {
 
     kill('USR1', $config->launchpid) || warn "Could not wake up launcher";
 
-    while ((!defined $obj->windowid) || $obj->slave_count || $obj->launcher) {
+    while (1) {
+        $obj->close_finished_windows;
+        last if defined($obj->windowid) && !$obj->slave_count &&
+            !$obj->launcher && !$obj->has_pending_closes;
         $obj->redraw if $need_redraw;
         $obj->title("Master - ".join ", ", grep { defined } 
             map { $_->hostname } CsshX::Master::Socket::Slave->slaves);
         #$obj->title("Master - ".$obj->slave_count." connections");
-        $obj->handle_io();
+        $obj->handle_io($obj->has_pending_closes ? 0.2 : undef);
     }
     unlink $sock;
     warn "Done";
@@ -1436,6 +1440,34 @@ sub prompt       { *{$_[0]}->{prompt};         }
 
 sub slaves       { CsshX::Master::Socket::Slave->slaves; }
 sub slave_count  { CsshX::Master::Socket::Slave->slave_count; }
+
+# Terminal can leave the window behind after simultaneous session exits.
+# Wait until Terminal has released its processes before requesting a close.
+sub pending_closes { *{$_[0]}->{pending_closes} ||= {} }
+sub has_pending_closes { scalar keys %{$_[0]->pending_closes} }
+
+sub close_finished_windows {
+    my ($master) = @_;
+    my $pending = $master->pending_closes;
+    foreach my $id (keys %$pending) {
+        my $entry = $pending->{$id};
+        my $done = eval {
+            my $window = $master->winobj_by_id($id);
+            if (!$window->exists) { 1 }
+            elsif ($window->tabs->count != 1) { 1 }
+            else {
+                my $tab = $window->tabs->objectAtIndex_(0);
+                if ($tab->tty->UTF8String ne $entry->{tty}) { 1 }
+                elsif ($tab->processes->count) { 0 }
+                else {
+                    $window->closeSaving_savingIn_(CsshX::Window::OSType('no  '), undef);
+                    0; # Confirm disappearance on the next pass.
+                }
+            }
+        };
+        delete $pending->{$id} if $done || time >= $entry->{deadline};
+    }
+}
 
 sub register_slave {
     my ($obj, $slaveid, $hostname, $win_id, $tab_id) = @_;
@@ -1937,8 +1969,9 @@ sub parse_buffer {
         my $type = $1;
         $obj->set_read_buffer($buffer);
         
-        if ($type =~ /^slave\s+(\d+)\s+(\S+)$/) {
-            my ($slaveid, $hostname) = ($1,$2);
+        if ($type =~ /^slave\s+(\d+)\s+(\S+)(?:\s+(\/dev\/ttys\d+))?$/) {
+            my ($slaveid, $hostname, $tty) = ($1,$2,$3);
+            *$obj->{session_tty} = $tty;
             bless $obj, 'CsshX::Master::Socket::Slave';
             $obj->replace_slave($slaveid, $hostname, undef, undef);
         } elsif ($type eq "launcher") {
@@ -1984,6 +2017,11 @@ sub send_input {
 sub terminate {
     my ($obj) = @_;
     Growl->notify("Close", "Closed ".$obj->hostname);
+    if (!$config->debug && $obj->windowid && *$obj->{session_tty}) {
+        $obj->master->pending_closes->{$obj->windowid} = {
+            tty => *$obj->{session_tty}, deadline => time + 30,
+        };
+    }
     delete $slaves_by_slaveid->{$obj->slaveid};
     $obj->SUPER::terminate();
 }
